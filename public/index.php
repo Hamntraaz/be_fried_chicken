@@ -59,13 +59,13 @@ function db(): PDO
         $parts = parse_url($databaseUrl);
         $host = $parts['host'] ?? env_value(['MYSQLHOST', 'DB_HOST'], '127.0.0.1');
         $port = (string)($parts['port'] ?? env_value(['MYSQLPORT', 'DB_PORT'], '3306'));
-        $database = ltrim((string)($parts['path'] ?? ''), '/') ?: env_value(['MYSQLDATABASE', 'DB_DATABASE'], 'railway');
+        $database = ltrim((string)($parts['path'] ?? ''), '/') ?: env_value(['MYSQL_DATABASE', 'MYSQLDATABASE', 'DB_DATABASE'], 'railway');
         $username = isset($parts['user']) ? urldecode($parts['user']) : env_value(['MYSQLUSER', 'DB_USERNAME'], 'root');
         $password = isset($parts['pass']) ? urldecode($parts['pass']) : env_value(['MYSQLPASSWORD', 'DB_PASSWORD'], '');
     } else {
         $host = env_value(['MYSQLHOST', 'DB_HOST'], '127.0.0.1');
         $port = env_value(['MYSQLPORT', 'DB_PORT'], '3306');
-        $database = env_value(['MYSQLDATABASE', 'DB_DATABASE'], 'be_fried_chicken');
+        $database = env_value(['MYSQL_DATABASE', 'MYSQLDATABASE', 'DB_DATABASE'], 'be_fried_chicken');
         $username = env_value(['MYSQLUSER', 'DB_USERNAME'], 'root');
         $password = env_value(['MYSQLPASSWORD', 'DB_PASSWORD'], 'root');
     }
