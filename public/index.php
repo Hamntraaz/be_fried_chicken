@@ -40,13 +40,35 @@ function response_json($data, int $status = 200): void
     exit;
 }
 
+function env_value(array $keys, $default = null)
+{
+    foreach ($keys as $key) {
+        $value = getenv($key);
+        if ($value !== false && $value !== '') {
+            return $value;
+        }
+    }
+    return $default;
+}
+
 function db(): PDO
 {
-    $host = getenv('DB_HOST') ?: '127.0.0.1';
-    $port = getenv('DB_PORT') ?: '3306';
-    $database = getenv('DB_DATABASE') ?: 'be_fried_chicken';
-    $username = getenv('DB_USERNAME') ?: 'root';
-    $password = getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'root';
+    $databaseUrl = env_value(['MYSQL_URL', 'DATABASE_URL', 'DB_URL', 'MYSQL_PUBLIC_URL']);
+
+    if ($databaseUrl) {
+        $parts = parse_url($databaseUrl);
+        $host = $parts['host'] ?? env_value(['MYSQLHOST', 'DB_HOST'], '127.0.0.1');
+        $port = (string)($parts['port'] ?? env_value(['MYSQLPORT', 'DB_PORT'], '3306'));
+        $database = ltrim((string)($parts['path'] ?? ''), '/') ?: env_value(['MYSQLDATABASE', 'DB_DATABASE'], 'railway');
+        $username = isset($parts['user']) ? urldecode($parts['user']) : env_value(['MYSQLUSER', 'DB_USERNAME'], 'root');
+        $password = isset($parts['pass']) ? urldecode($parts['pass']) : env_value(['MYSQLPASSWORD', 'DB_PASSWORD'], '');
+    } else {
+        $host = env_value(['MYSQLHOST', 'DB_HOST'], '127.0.0.1');
+        $port = env_value(['MYSQLPORT', 'DB_PORT'], '3306');
+        $database = env_value(['MYSQLDATABASE', 'DB_DATABASE'], 'be_fried_chicken');
+        $username = env_value(['MYSQLUSER', 'DB_USERNAME'], 'root');
+        $password = env_value(['MYSQLPASSWORD', 'DB_PASSWORD'], 'root');
+    }
 
     return new PDO(
         "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4",
@@ -110,6 +132,132 @@ function add_column_if_missing(PDO $pdo, string $table, string $column, string $
 
 function ensure_schema(PDO $pdo): void
 {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS warehouses (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        address TEXT NULL,
+        status VARCHAR(50) DEFAULT 'Aktif',
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS suppliers (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        phone VARCHAR(30) NULL,
+        address TEXT NULL,
+        material_type VARCHAR(100) NULL,
+        material_unit VARCHAR(50) NULL,
+        status VARCHAR(50) DEFAULT 'Aktif',
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS couriers (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        supplier_id BIGINT UNSIGNED NULL,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(30) NULL,
+        vehicle_plate VARCHAR(30) NULL,
+        status VARCHAR(50) DEFAULT 'Tersedia',
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_couriers_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        role ENUM('admin', 'supplier', 'courier', 'manager') NOT NULL,
+        status VARCHAR(50) DEFAULT 'Aktif',
+        supplier_id BIGINT UNSIGNED NULL,
+        courier_id BIGINT UNSIGNED NULL,
+        warehouse_id BIGINT UNSIGNED NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS materials (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        category VARCHAR(100) NULL,
+        unit VARCHAR(50) NOT NULL,
+        stock INT DEFAULT 0,
+        minimum_stock INT DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'Aman',
+        is_active TINYINT(1) DEFAULT 1,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS purchase_orders (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        order_code VARCHAR(50) NOT NULL UNIQUE,
+        supplier_id BIGINT UNSIGNED NULL,
+        courier_id BIGINT UNSIGNED NULL,
+        warehouse_id BIGINT UNSIGNED NULL,
+        status VARCHAR(100) DEFAULT 'Permintaan Dikirim',
+        notes TEXT NULL,
+        ordered_at TIMESTAMP NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_orders_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+        CONSTRAINT fk_orders_courier FOREIGN KEY (courier_id) REFERENCES couriers(id) ON DELETE SET NULL,
+        CONSTRAINT fk_orders_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        purchase_order_id BIGINT UNSIGNED NOT NULL,
+        material_id BIGINT UNSIGNED NOT NULL,
+        quantity INT NOT NULL,
+        unit VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_order_items_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        CONSTRAINT fk_order_items_material FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS deliveries (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        purchase_order_id BIGINT UNSIGNED NOT NULL,
+        courier_id BIGINT UNSIGNED NULL,
+        status VARCHAR(100) DEFAULT 'Menunggu Konfirmasi Supplier',
+        pickup_address VARCHAR(255) NULL,
+        destination_address VARCHAR(255) NULL,
+        pickup_lat DECIMAL(10,7) NULL,
+        pickup_lng DECIMAL(10,7) NULL,
+        destination_lat DECIMAL(10,7) NULL,
+        destination_lng DECIMAL(10,7) NULL,
+        started_at TIMESTAMP NULL,
+        finished_at TIMESTAMP NULL,
+        proof_photo MEDIUMTEXT NULL,
+        proof_note TEXT NULL,
+        completed_lat DECIMAL(10,7) NULL,
+        completed_lng DECIMAL(10,7) NULL,
+        proof_uploaded_at TIMESTAMP NULL,
+        rejection_reason TEXT NULL,
+        rejection_proof MEDIUMTEXT NULL,
+        rejected_at TIMESTAMP NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_deliveries_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        CONSTRAINT fk_deliveries_courier FOREIGN KEY (courier_id) REFERENCES couriers(id) ON DELETE SET NULL
+    )");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS delivery_locations (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        delivery_id BIGINT UNSIGNED NOT NULL,
+        latitude DECIMAL(10,7) NOT NULL,
+        longitude DECIMAL(10,7) NOT NULL,
+        recorded_at TIMESTAMP NULL,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_delivery_locations_delivery FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE CASCADE
+    )");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS user_locations (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id BIGINT UNSIGNED NULL,
@@ -135,31 +283,6 @@ function ensure_schema(PDO $pdo): void
         KEY idx_order_notification (order_id)
     )");
 
-    add_column_if_missing($pdo, 'deliveries', 'proof_photo', 'MEDIUMTEXT NULL');
-    add_column_if_missing($pdo, 'deliveries', 'proof_note', 'TEXT NULL');
-    add_column_if_missing($pdo, 'deliveries', 'completed_lat', 'DECIMAL(10,7) NULL');
-    add_column_if_missing($pdo, 'deliveries', 'completed_lng', 'DECIMAL(10,7) NULL');
-    add_column_if_missing($pdo, 'deliveries', 'proof_uploaded_at', 'TIMESTAMP NULL');
-    add_column_if_missing($pdo, 'deliveries', 'rejection_reason', 'TEXT NULL');
-    add_column_if_missing($pdo, 'deliveries', 'rejection_proof', 'MEDIUMTEXT NULL');
-    add_column_if_missing($pdo, 'deliveries', 'rejected_at', 'TIMESTAMP NULL');
-    add_column_if_missing($pdo, 'users', 'supplier_id', 'BIGINT UNSIGNED NULL');
-    add_column_if_missing($pdo, 'users', 'courier_id', 'BIGINT UNSIGNED NULL');
-    add_column_if_missing($pdo, 'users', 'warehouse_id', 'BIGINT UNSIGNED NULL');
-    add_column_if_missing($pdo, 'suppliers', 'material_unit', 'VARCHAR(50) NULL');
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS warehouses (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(150) NOT NULL,
-        address TEXT NULL,
-        status VARCHAR(50) DEFAULT 'Aktif',
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )");
-
-    $count = (int)$pdo->query('SELECT COUNT(*) FROM warehouses')->fetchColumn();
-    // Gudang/cabang dibuat dari akun manajer agar data master benar-benar manual.
-
     $pdo->exec("CREATE TABLE IF NOT EXISTS material_movements (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         material_id BIGINT UNSIGNED NOT NULL,
@@ -179,8 +302,24 @@ function ensure_schema(PDO $pdo): void
         KEY idx_material_movements_order (purchase_order_id)
     )");
 
+    add_column_if_missing($pdo, 'deliveries', 'proof_photo', 'MEDIUMTEXT NULL');
+    add_column_if_missing($pdo, 'deliveries', 'proof_note', 'TEXT NULL');
+    add_column_if_missing($pdo, 'deliveries', 'completed_lat', 'DECIMAL(10,7) NULL');
+    add_column_if_missing($pdo, 'deliveries', 'completed_lng', 'DECIMAL(10,7) NULL');
+    add_column_if_missing($pdo, 'deliveries', 'proof_uploaded_at', 'TIMESTAMP NULL');
+    add_column_if_missing($pdo, 'deliveries', 'rejection_reason', 'TEXT NULL');
+    add_column_if_missing($pdo, 'deliveries', 'rejection_proof', 'MEDIUMTEXT NULL');
+    add_column_if_missing($pdo, 'deliveries', 'rejected_at', 'TIMESTAMP NULL');
+    add_column_if_missing($pdo, 'users', 'supplier_id', 'BIGINT UNSIGNED NULL');
+    add_column_if_missing($pdo, 'users', 'courier_id', 'BIGINT UNSIGNED NULL');
+    add_column_if_missing($pdo, 'users', 'warehouse_id', 'BIGINT UNSIGNED NULL');
+    add_column_if_missing($pdo, 'suppliers', 'material_unit', 'VARCHAR(50) NULL');
     add_column_if_missing($pdo, 'materials', 'is_active', 'TINYINT(1) DEFAULT 1');
     add_column_if_missing($pdo, 'purchase_orders', 'warehouse_id', 'BIGINT UNSIGNED NULL');
+
+    $pdo->exec("INSERT INTO users (name, email, password, role, status, created_at, updated_at)
+        SELECT 'Manajemen Rafiza', 'manager@gmail.com', '12345678', 'manager', 'Aktif', NOW(), NOW()
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'manager@gmail.com')");
 }
 
 function normalize_material(array $row): array
