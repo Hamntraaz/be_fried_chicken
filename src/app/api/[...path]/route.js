@@ -1,5 +1,5 @@
-import { initDb, query } from '@/lib/db'
-import { corsHeaders, json, makeId, mapCourier, mapDelivery, mapMaterial, mapOrder, mapSupplier, readBody } from '@/lib/helpers'
+import { initDb, query } from '../../../lib/db'
+import { corsHeaders, json, makeId, mapCourier, mapDelivery, mapMaterial, mapOrder, mapSupplier, readBody } from '../../../lib/helpers'
 
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders() })
@@ -7,10 +7,16 @@ export async function OPTIONS() {
 
 export async function GET(request, context) {
   try {
-    await initDb()
     const path = '/' + (context.params.path || []).join('/')
 
     if (path === '/health') return json({ ok: true, message: 'Backend aktif' })
+    if (path === '/db-test') {
+      await initDb()
+      const rows = await query('SELECT 1 AS ok')
+      return json({ ok: true, database: rows[0] })
+    }
+
+    await initDb()
     if (path === '/overview') return json(await getOverview())
 
     return json({ message: `Endpoint GET ${path} tidak ditemukan` }, 404)

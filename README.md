@@ -1,45 +1,25 @@
 # Backend Next.js - Rafiza Fried Chicken
 
-Backend ini dibuat untuk FE React/Vite kamu. Endpoint disesuaikan dengan `src/services/api.js` di frontend.
+Endpoint utama:
+- GET `/api/health` untuk cek server aktif tanpa database
+- GET `/api/db-test` untuk cek koneksi MySQL
+- POST `/api/login`
+- GET `/api/overview`
 
-## Jalankan lokal
+## Railway Variables wajib
 
-```bash
-npm install
-cp .env.example .env
-npm run dev
+```env
+DATABASE_URL=${{MySQL.MYSQL_URL}}
+FRONTEND_URL=https://rafiza-fried-chicken.vercel.app
+JWT_SECRET=rafiza_secret_key
 ```
 
-Backend jalan di:
+Setelah variable diubah, klik **Deploy / Redeploy** di Railway.
 
-```txt
-http://localhost:3001/api
+## Vercel Frontend Variable
+
+```env
+VITE_API_BASE_URL=https://DOMAIN-BACKEND-RAILWAY/api
 ```
 
-Di frontend `.env`, isi:
-
-```txt
-VITE_API_BASE_URL=http://localhost:3001/api
-```
-
-## Deploy Railway
-
-1. Upload/push folder ini ke GitHub.
-2. Buat project baru di Railway.
-3. Tambahkan service MySQL di Railway.
-4. Tambahkan variable:
-   - `DATABASE_URL` dari Railway MySQL
-   - `FRONTEND_URL` = URL Vercel frontend kamu, contoh `https://nama-project.vercel.app`
-5. Deploy.
-6. Setelah backend Railway aktif, ubah `.env` frontend Vercel:
-
-```txt
-VITE_API_BASE_URL=https://nama-backend.up.railway.app/api
-```
-
-## Akun default
-
-- admin@gmail.com / 12345678
-- supplier@gmail.com / 12345678
-- kurir@gmail.com / 12345678
-- manager@gmail.com / 12345678
+Domain backend harus diambil dari Railway > backend service > Settings > Networking/Public Domain.
