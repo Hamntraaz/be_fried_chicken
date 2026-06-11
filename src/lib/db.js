@@ -53,6 +53,17 @@ export async function initDb() {
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
 
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_branches (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(40) UNIQUE,
+    name VARCHAR(160) NOT NULL,
+    address TEXT,
+    status VARCHAR(40) DEFAULT 'Aktif',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`)
+
   await query(`CREATE TABLE IF NOT EXISTS rfz_suppliers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(40) UNIQUE,
@@ -104,6 +115,7 @@ export async function initDb() {
     supplier_id INT NULL,
     courier_id INT NULL,
     warehouse_id INT NULL,
+    branch_id INT NULL,
     status VARCHAR(40) DEFAULT 'Aktif',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -167,16 +179,65 @@ export async function initDb() {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`)
 
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_branch_stocks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_id INT NOT NULL,
+    material_id INT NOT NULL,
+    stock DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_branch_material (branch_id, material_id)
+  )`)
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_branch_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(60) UNIQUE,
+    branch_id INT NOT NULL,
+    warehouse_id INT NULL,
+    material_id INT NOT NULL,
+    quantity DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
+    status VARCHAR(80) DEFAULT 'Menunggu Persetujuan Gudang',
+    notes TEXT,
+    requested_by VARCHAR(160),
+    approved_by VARCHAR(160),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`)
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_branch_sales (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(60) UNIQUE,
+    branch_id INT NOT NULL,
+    material_id INT NOT NULL,
+    quantity DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
+    notes TEXT,
+    created_by VARCHAR(160),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`)
+
   await query(`CREATE TABLE IF NOT EXISTS rfz_actor_locations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,
     role VARCHAR(40),
+    supplier_id INT NULL,
+    courier_id INT NULL,
+    warehouse_id INT NULL,
+    branch_id INT NULL,
     latitude DECIMAL(11,8),
     longitude DECIMAL(11,8),
     accuracy DECIMAL(10,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`)
 
+
+  try { await query(`ALTER TABLE rfz_users ADD COLUMN branch_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN supplier_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN courier_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN warehouse_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN branch_id INT NULL`) } catch (error) {}
   await normalizeRoleData()
   await seedDb()
   initialized = true
@@ -184,7 +245,7 @@ export async function initDb() {
 
 async function normalizeRoleData() {
   await query(`UPDATE rfz_users
-    SET role='warehouse', role_name='Gudang/Cabang', avatar=COALESCE(NULLIF(avatar,''),'GD'), description='Mengelola stok bahan baku, membuat pesanan pembelian, dan mengonfirmasi barang diterima.'
+    SET role='warehouse', role_name='Gudang', avatar=COALESCE(NULLIF(avatar,''),'GD'), description='Mengelola stok gudang, membuat pesanan ke supplier, dan memenuhi permintaan cabang.'
     WHERE role='admin'`)
 }
 
@@ -192,6 +253,6 @@ async function seedDb() {
   const userCount = await query('SELECT COUNT(*) AS total FROM rfz_users')
   if (userCount[0].total === 0) {
     await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,warehouse_id,status) VALUES
-      ('Rafiza Management','manager@gmail.com','12345678','manager','Manager','Head Office Rafiza','MG','Mengelola akun supplier, gudang/cabang, monitoring, dan laporan operasional.',NULL,NULL,NULL,'Aktif')`)
+      ('Rafiza Management','manager@gmail.com','12345678','manager','Manager','Head Office Rafiza','MG','Mengelola akun supplier, gudang, cabang, monitoring, dan laporan operasional.',NULL,NULL,NULL,'Aktif')`)
   }
 }

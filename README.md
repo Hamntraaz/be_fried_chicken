@@ -1,64 +1,30 @@
-# Backend Next.js Rafiza - Vercel Ready
+# Rafiza Backend API - Gudang & Cabang Dipisah
 
-Backend API untuk FE React/Vite Rafiza Fried Chicken.
-Endpoint sudah dipisah di `src/pages/api/*.js` dan siap deploy ke Vercel.
+Backend Next.js API siap deploy ke Vercel. Database tetap MySQL Railway menggunakan `MYSQL_PUBLIC_URL` sebagai `DATABASE_URL` di Vercel.
 
-## Struktur penting
+## Role
+- `manager`: mengelola akun/mitra dan monitoring.
+- `warehouse`: Gudang pusat, memesan bahan ke supplier, menerima barang, memproses permintaan cabang.
+- `branch`: Cabang penjualan, meminta barang ke gudang, menerima stok, mencatat penjualan.
+- `supplier`: menerima pesanan dari gudang dan menugaskan kurir.
+- `courier`: mengantar barang supplier ke gudang.
 
-```txt
-src/pages/api/
-├─ health.js
-├─ login.js
-├─ overview.js
-├─ purchase-orders.js
-├─ supplier-confirm.js
-├─ couriers.js
-├─ materials.js
-├─ production-usage.js
-├─ receive-order.js
-├─ courier-status.js
-├─ manager-suppliers.js
-├─ manager-suppliers-update.js
-├─ manager-suppliers-delete.js
-├─ manager-warehouses.js
-├─ manager-warehouses-update.js
-└─ manager-warehouses-delete.js
-```
+## Endpoint Baru
+- `POST /api/manager-branches`: tambah cabang + akun cabang.
+- `POST /api/manager-branches-update`: edit cabang + akun cabang.
+- `POST /api/manager-branches-delete`: nonaktifkan cabang + akun cabang.
+- `POST /api/branch-requests`: cabang membuat permintaan barang ke gudang.
+- `POST /api/branch-request-status`: gudang approve/reject/send, cabang receive.
+- `POST /api/branch-sales`: cabang mencatat penjualan dan stok cabang berkurang.
 
-## Environment Variables Backend di Vercel
-
-Gunakan `MYSQL_PUBLIC_URL` dari Railway MySQL sebagai `DATABASE_URL`.
-Jangan gunakan `MYSQL_URL` / host `.railway.internal` untuk Vercel.
-
+## Environment Vercel Backend
 ```env
 DATABASE_URL=mysql://root:password@xxxx.proxy.rlwy.net:PORT/railway
 FRONTEND_URL=https://rafiza-fried-chicken.vercel.app
 JWT_SECRET=rafiza_secret_key
 ```
 
-## Environment Variables Frontend di Vercel
-
-Setelah backend Vercel jadi, ubah frontend:
-
-```env
-VITE_API_BASE_URL=https://domain-backend-vercel.vercel.app/api
+## Akun awal
+```txt
+manager@gmail.com / 12345678
 ```
-
-Lalu redeploy frontend.
-
-## Deploy Backend ke Vercel
-
-1. Push folder backend ini ke GitHub.
-2. Vercel → Add New Project → pilih repo backend.
-3. Framework Preset: Next.js.
-4. Root Directory: `/`.
-5. Tambahkan Environment Variables backend.
-6. Deploy.
-7. Tes: `https://domain-backend-vercel.vercel.app/api/health`.
-
-## Akun Login Default
-
-- admin@gmail.com / 12345678
-- supplier@gmail.com / 12345678
-- kurir@gmail.com / 12345678
-- manager@gmail.com / 12345678
