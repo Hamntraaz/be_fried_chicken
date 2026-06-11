@@ -89,7 +89,9 @@ function mapCourier(row) {
     id: row.id,
     code: row.code || `KUR-${String(row.id).padStart(3, '0')}`,
     supplier_id: row.supplier_id,
+    warehouse_id: row.warehouse_id,
     supplier_name: row.supplier_name || '-',
+    warehouse_name: row.warehouse_name || '-',
     name: row.name,
     phone: row.phone,
     vehicle_plate: row.vehicle_plate,
@@ -139,7 +141,9 @@ function mapDelivery(row) {
     order_id: row.order_id,
     order_code: row.order_code || '-',
     supplier_id: row.supplier_id,
+    warehouse_id: row.warehouse_id,
     supplier_name: row.supplier_name || '-',
+    warehouse_name: row.warehouse_name || '-',
     warehouse_id: row.warehouse_id,
     warehouse_name: row.warehouse_name || '-',
     courier_id: row.courier_id,
@@ -219,6 +223,14 @@ function mapBranchRequest(row) {
     notes: row.notes,
     requested_by: row.requested_by,
     approved_by: row.approved_by,
+    courier_id: row.courier_id,
+    courier_name: row.courier_name || 'Belum ditugaskan',
+    current_lat: row.current_lat ? Number(row.current_lat) : null,
+    current_lng: row.current_lng ? Number(row.current_lng) : null,
+    proof_photo: row.proof_photo,
+    proof_note: row.proof_note,
+    proof_uploaded_at: row.proof_uploaded_at ? formatDate(row.proof_uploaded_at) : null,
+    delivered_at: row.delivered_at ? formatDate(row.delivered_at) : null,
     created_at: formatDate(row.created_at),
     updated_at: formatDate(row.updated_at),
   }
@@ -252,7 +264,7 @@ async function overviewRows() {
     LEFT JOIN rfz_branches b ON b.id = u.branch_id
     LEFT JOIN rfz_couriers c ON c.id = u.courier_id
     ORDER BY u.id`)
-  const couriers = await query(`SELECT c.*, s.name AS supplier_name FROM rfz_couriers c LEFT JOIN rfz_suppliers s ON s.id = c.supplier_id ORDER BY c.id`)
+  const couriers = await query(`SELECT c.*, s.name AS supplier_name, w.name AS warehouse_name FROM rfz_couriers c LEFT JOIN rfz_suppliers s ON s.id = c.supplier_id LEFT JOIN rfz_warehouses w ON w.id = c.warehouse_id ORDER BY c.id`)
   const orders = await query(`SELECT o.*, m.name AS material_name, s.name AS supplier_name, s.material_unit, w.name AS warehouse_name, c.name AS courier_name
     FROM rfz_orders o
     LEFT JOIN rfz_materials m ON m.id = o.material_id
@@ -278,11 +290,12 @@ async function overviewRows() {
     LEFT JOIN rfz_branches b ON b.id = bs.branch_id
     LEFT JOIN rfz_materials m ON m.id = bs.material_id
     ORDER BY b.name, m.name`)
-  const branchRequests = await query(`SELECT br.*, b.name AS branch_name, w.name AS warehouse_name, m.name AS material_name, m.unit AS material_unit
+  const branchRequests = await query(`SELECT br.*, b.name AS branch_name, w.name AS warehouse_name, m.name AS material_name, m.unit AS material_unit, c.name AS courier_name
     FROM rfz_branch_requests br
     LEFT JOIN rfz_branches b ON b.id = br.branch_id
     LEFT JOIN rfz_warehouses w ON w.id = br.warehouse_id
     LEFT JOIN rfz_materials m ON m.id = br.material_id
+    LEFT JOIN rfz_couriers c ON c.id = br.courier_id
     ORDER BY br.created_at DESC, br.id DESC`)
   const branchSales = await query(`SELECT bsale.*, b.name AS branch_name, m.name AS material_name, m.unit AS material_unit
     FROM rfz_branch_sales bsale
@@ -507,8 +520,35 @@ export async function updateOrderStatus(req) {
   return ok({ success: true, message: 'Status order diperbarui' })
 }
 
+async function getBranchRequest(id) {
+  return (await query('SELECT * FROM rfz_branch_requests WHERE id=? LIMIT 1', [Number(id || 0)]))[0]
+}
+
+function isBranchDeliveryBody(body = {}) {
+  return body.delivery_type === 'branch_request' || body.type === 'branch_request' || body.request_id || body.requestId || body.branch_request_id
+}
+
+function branchRequestIdFromBody(body = {}) {
+  return Number(body.request_id || body.requestId || body.branch_request_id || body.delivery_id || body.deliveryId || 0)
+}
+
 export async function courierTaskResponse(req) {
   const body = req.body || {}
+  if (isBranchDeliveryBody(body)) {
+    const requestId = branchRequestIdFromBody(body)
+    const reqRow = await getBranchRequest(requestId)
+    if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (body.action === 'reject') {
+      await query(`UPDATE rfz_branch_requests SET status='Ditolak Kurir', notes=CONCAT(COALESCE(notes,''), ?), updated_at=NOW() WHERE id=?`, [`
+Alasan kurir: ${body.reason || '-'}`, requestId])
+      if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Tersedia' WHERE id=?`, [reqRow.courier_id])
+      return ok({ success: true, message: 'Tugas distribusi cabang ditolak' })
+    }
+    await query(`UPDATE rfz_branch_requests SET status='Tugas Diterima Kurir', updated_at=NOW() WHERE id=?`, [requestId])
+    if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Dalam Pengiriman' WHERE id=?`, [reqRow.courier_id])
+    return ok({ success: true, message: 'Tugas distribusi cabang diterima' })
+  }
+
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
@@ -524,8 +564,18 @@ export async function courierTaskResponse(req) {
   return ok({ success: true, message: 'Tugas berhasil diterima' })
 }
 
+
 export async function driverStart(req) {
   const body = req.body || {}
+  if (isBranchDeliveryBody(body)) {
+    const requestId = branchRequestIdFromBody(body)
+    const reqRow = await getBranchRequest(requestId)
+    if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    await query(`UPDATE rfz_branch_requests SET status='Kurir Dalam Perjalanan', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
+    if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Dalam Pengiriman' WHERE id=?`, [reqRow.courier_id])
+    return ok({ success: true, message: 'Kurir gudang mulai mengirim barang ke cabang' })
+  }
+
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
@@ -540,8 +590,16 @@ export async function driverStart(req) {
   return ok({ success: true, message: 'Kurir mulai pengiriman' })
 }
 
+
 export async function updateDeliveryLocation(req) {
   const body = req.body || {}
+  if (isBranchDeliveryBody(body)) {
+    const requestId = branchRequestIdFromBody(body)
+    if (!requestId) return ok({ success: false, message: 'Request cabang wajib diisi' }, 400)
+    await query(`UPDATE rfz_branch_requests SET current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
+    return ok({ success: true, message: 'Lokasi distribusi cabang diperbarui' })
+  }
+
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   if (!deliveryId) return ok({ success: false, message: 'Delivery wajib diisi' }, 400)
   await query(`UPDATE rfz_deliveries SET current_lat=?, current_lng=?, progress=GREATEST(progress,60), recorded_at=NOW() WHERE id=?`, [
@@ -552,26 +610,52 @@ export async function updateDeliveryLocation(req) {
   return ok({ success: true, message: 'Lokasi pengiriman diperbarui' })
 }
 
+
 export async function driverArrived(req) {
   const body = req.body || {}
+  if (isBranchDeliveryBody(body)) {
+    const requestId = branchRequestIdFromBody(body)
+    const reqRow = await getBranchRequest(requestId)
+    if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    await query(`UPDATE rfz_branch_requests SET status='Driver Sampai', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
+    return ok({ success: true, message: 'Kurir sampai di cabang. Upload bukti foto untuk menyelesaikan.' })
+  }
+
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
 
-  await query(`UPDATE rfz_deliveries SET status='Menunggu Konfirmasi Gudang', current_lat=?, current_lng=?, progress=90, recorded_at=NOW() WHERE id=?`, [
+  await query(`UPDATE rfz_deliveries SET status='Driver Sampai', current_lat=?, current_lng=?, progress=90, recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
     body.longitude || null,
     deliveryId,
   ])
-  await query(`UPDATE rfz_orders SET status='Menunggu Konfirmasi Gudang' WHERE id=?`, [delivery.order_id])
-  return ok({ success: true, message: 'Kurir tiba di gudang' })
+  await query(`UPDATE rfz_orders SET status='Driver Sampai' WHERE id=?`, [delivery.order_id])
+  return ok({ success: true, message: 'Kurir tiba di gudang. Upload bukti foto untuk menyelesaikan.' })
 }
+
 
 export async function deliveryComplete(req) {
   const body = req.body || {}
+  if (isBranchDeliveryBody(body)) {
+    const requestId = branchRequestIdFromBody(body)
+    const reqRow = await getBranchRequest(requestId)
+    if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (!body.proof_photo && !body.proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
+    await query(`UPDATE rfz_branch_requests SET status='Menunggu Konfirmasi Cabang', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), delivered_at=NOW(), updated_at=NOW() WHERE id=?`, [
+      body.latitude || null,
+      body.longitude || null,
+      body.proof_photo || body.proofPhoto || null,
+      body.proof_note || body.proofNote || null,
+      requestId,
+    ])
+    return ok({ success: true, message: 'Bukti distribusi cabang tersimpan, menunggu cabang menerima barang' })
+  }
+
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!body.proof_photo && !body.proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
 
   await query(`UPDATE rfz_deliveries SET status='Menunggu Konfirmasi Gudang', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), progress=95, recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
@@ -583,6 +667,7 @@ export async function deliveryComplete(req) {
   await query(`UPDATE rfz_orders SET status='Menunggu Konfirmasi Gudang' WHERE id=?`, [delivery.order_id])
   return ok({ success: true, message: 'Bukti pengiriman tersimpan, menunggu konfirmasi gudang' })
 }
+
 
 export async function receiveOrder(req) {
   const body = req.body || {}
@@ -614,13 +699,16 @@ export async function assignCourier(req) {
 
 export async function createCourier(req) {
   const body = req.body || {}
-  const supplierId = Number(body.supplier_id || body.supplierId || 0)
-  if (!supplierId || !body.name) return ok({ success: false, message: 'Supplier dan nama kurir wajib diisi' }, 400)
+  const supplierId = Number(body.supplier_id || body.supplierId || 0) || null
+  const warehouseId = Number(body.warehouse_id || body.warehouseId || 0) || null
+  if (!supplierId && !warehouseId) return ok({ success: false, message: 'Supplier atau gudang wajib dipilih' }, 400)
+  if (!body.name) return ok({ success: false, message: 'Nama kurir wajib diisi' }, 400)
 
   const code = makeCode('KUR')
-  const result = await query(`INSERT INTO rfz_couriers (code, supplier_id, name, phone, vehicle_plate, status) VALUES (?,?,?,?,?,?)`, [
+  const result = await query(`INSERT INTO rfz_couriers (code, supplier_id, warehouse_id, name, phone, vehicle_plate, status) VALUES (?,?,?,?,?,?,?)`, [
     code,
     supplierId,
+    warehouseId,
     body.name,
     body.phone || null,
     body.vehicle_plate || body.plate || null,
@@ -628,19 +716,20 @@ export async function createCourier(req) {
   ])
 
   if (body.email) {
-    await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), supplier_id=VALUES(supplier_id), courier_id=VALUES(courier_id), status='Aktif'`, [
+    await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,warehouse_id,status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), supplier_id=VALUES(supplier_id), warehouse_id=VALUES(warehouse_id), courier_id=VALUES(courier_id), status='Aktif'`, [
       body.name,
       body.email,
       body.password || '12345678',
       'courier',
       'Kurir',
-      'Kurir Mitra Supplier',
+      supplierId ? 'Kurir Mitra Supplier' : 'Kurir Gudang',
       initials(body.name),
-      'Akun kurir supplier.',
+      supplierId ? 'Akun kurir supplier.' : 'Akun kurir gudang untuk distribusi ke cabang.',
       supplierId,
       result.insertId,
+      warehouseId,
       body.status || 'Aktif',
     ])
   }
@@ -740,7 +829,8 @@ export async function updateBranchRequest(req) {
   if (!reqRow) return ok({ success: false, message: 'Permintaan cabang tidak ditemukan' }, 404)
 
   if (action === 'reject') {
-    await query(`UPDATE rfz_branch_requests SET status='Ditolak Gudang', notes=CONCAT(COALESCE(notes,''), ?), approved_by=? WHERE id=?`, [`\nAlasan: ${body.reason || body.notes || '-'}`, requester, id])
+    await query(`UPDATE rfz_branch_requests SET status='Ditolak Gudang', notes=CONCAT(COALESCE(notes,''), ?), approved_by=? WHERE id=?`, [`
+Alasan: ${body.reason || body.notes || '-'}`, requester, id])
     return ok({ success: true, message: 'Permintaan cabang ditolak' })
   }
 
@@ -750,6 +840,8 @@ export async function updateBranchRequest(req) {
   }
 
   if (action === 'send' || action === 'process') {
+    const courierId = Number(body.courier_id || body.courierId || 0)
+    if (!courierId) return ok({ success: false, message: 'Pilih kurir gudang terlebih dahulu' }, 400)
     const material = (await query('SELECT * FROM rfz_materials WHERE id=? LIMIT 1', [reqRow.material_id]))[0]
     if (!material) return ok({ success: false, message: 'Material tidak ditemukan' }, 404)
     const before = toNumber(material.stock)
@@ -759,8 +851,9 @@ export async function updateBranchRequest(req) {
     await query('UPDATE rfz_materials SET stock=? WHERE id=?', [after, material.id])
     await query(`INSERT INTO rfz_movements (material_id, movement_type, source_type, quantity, unit, stock_before, stock_after, notes, created_by)
       VALUES (?,?,?,?,?,?,?,?,?)`, [material.id, 'OUT', 'Distribusi ke Cabang', qty, reqRow.unit || material.unit, before, after, `Pengiriman permintaan ${reqRow.code}`, requester])
-    await query(`UPDATE rfz_branch_requests SET status='Dikirim ke Cabang', approved_by=? WHERE id=?`, [requester, id])
-    return ok({ success: true, message: 'Barang dikeluarkan dari gudang dan dikirim ke cabang' })
+    await query(`UPDATE rfz_branch_requests SET status='Menunggu Persetujuan Kurir', courier_id=?, approved_by=? WHERE id=?`, [courierId, requester, id])
+    await query(`UPDATE rfz_couriers SET status='Ditugaskan' WHERE id=?`, [courierId])
+    return ok({ success: true, message: 'Barang disiapkan dan tugas dikirim ke kurir gudang' })
   }
 
   if (action === 'receive') {
@@ -769,6 +862,7 @@ export async function updateBranchRequest(req) {
       VALUES (?,?,?,?)
       ON DUPLICATE KEY UPDATE stock=stock+VALUES(stock), unit=VALUES(unit)`, [reqRow.branch_id, reqRow.material_id, toNumber(reqRow.quantity), reqRow.unit || material?.unit || '-'])
     await query(`UPDATE rfz_branch_requests SET status='Diterima Cabang' WHERE id=?`, [id])
+    if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Tersedia' WHERE id=?`, [reqRow.courier_id])
     return ok({ success: true, message: 'Barang diterima cabang dan stok cabang bertambah' })
   }
 

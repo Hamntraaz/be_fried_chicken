@@ -94,6 +94,7 @@ export async function initDb() {
     id INT AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(40) UNIQUE,
     supplier_id INT,
+    warehouse_id INT NULL,
     name VARCHAR(160) NOT NULL,
     phone VARCHAR(60),
     vehicle_plate VARCHAR(80),
@@ -202,6 +203,13 @@ export async function initDb() {
     notes TEXT,
     requested_by VARCHAR(160),
     approved_by VARCHAR(160),
+    courier_id INT NULL,
+    current_lat DECIMAL(11,8),
+    current_lng DECIMAL(11,8),
+    proof_photo TEXT,
+    proof_note TEXT,
+    proof_uploaded_at TIMESTAMP NULL,
+    delivered_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
@@ -238,6 +246,15 @@ export async function initDb() {
   try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN courier_id INT NULL`) } catch (error) {}
   try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN warehouse_id INT NULL`) } catch (error) {}
   try { await query(`ALTER TABLE rfz_actor_locations ADD COLUMN branch_id INT NULL`) } catch (error) {}
+
+  try { await query(`ALTER TABLE rfz_couriers ADD COLUMN warehouse_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN courier_id INT NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN current_lat DECIMAL(11,8)`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN current_lng DECIMAL(11,8)`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN proof_photo TEXT`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN proof_note TEXT`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN proof_uploaded_at TIMESTAMP NULL`) } catch (error) {}
+  try { await query(`ALTER TABLE rfz_branch_requests ADD COLUMN delivered_at TIMESTAMP NULL`) } catch (error) {}
   await normalizeRoleData()
   await seedDb()
   initialized = true
