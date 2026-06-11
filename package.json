@@ -1,5 +1,5 @@
 {
-  "name": "be-nextjs-rafiza-vercel",
+  "name": "be-nextjs-rafiza",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "mysql2": "^3.11.3",
     "next": "^14.2.15",
@@ -17,6 +19,6 @@
   },
   "devDependencies": {},
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   }
 }
