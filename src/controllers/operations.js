@@ -138,10 +138,22 @@ function mapDelivery(row) {
     code: row.code || `DLV-${String(row.id).padStart(3, '0')}`,
     order_id: row.order_id,
     order_code: row.order_code || '-',
+    supplier_id: row.supplier_id,
+    supplier_name: row.supplier_name || '-',
+    warehouse_id: row.warehouse_id,
+    warehouse_name: row.warehouse_name || '-',
     courier_id: row.courier_id,
     courier_name: row.courier_name || 'Belum ditugaskan',
     status: row.status,
+    pickup_role: 'supplier',
+    pickup_label: row.supplier_name || 'Supplier',
+    pickup_lat: row.pickup_lat ? Number(row.pickup_lat) : null,
+    pickup_lng: row.pickup_lng ? Number(row.pickup_lng) : null,
     pickup_address: row.pickup_address || row.supplier_name || '-',
+    destination_role: 'warehouse',
+    destination_label: row.warehouse_name || 'Gudang',
+    destination_lat: row.destination_lat ? Number(row.destination_lat) : null,
+    destination_lng: row.destination_lng ? Number(row.destination_lng) : null,
     destination_address: row.destination_address || row.warehouse_name || 'Gudang Rafiza',
     current_lat: row.current_lat ? Number(row.current_lat) : null,
     current_lng: row.current_lng ? Number(row.current_lng) : null,
@@ -248,7 +260,7 @@ async function overviewRows() {
     LEFT JOIN rfz_warehouses w ON w.id = o.warehouse_id
     LEFT JOIN rfz_couriers c ON c.id = o.courier_id
     ORDER BY o.ordered_at DESC, o.id DESC`)
-  const deliveries = await query(`SELECT d.*, o.code AS order_code, s.name AS supplier_name, w.name AS warehouse_name, c.name AS courier_name
+  const deliveries = await query(`SELECT d.*, o.code AS order_code, o.supplier_id, o.warehouse_id, s.name AS supplier_name, w.name AS warehouse_name, c.name AS courier_name
     FROM rfz_deliveries d
     LEFT JOIN rfz_orders o ON o.id = d.order_id
     LEFT JOIN rfz_suppliers s ON s.id = o.supplier_id
