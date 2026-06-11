@@ -1,15 +1,17 @@
 import { initDb, query } from '../../../lib/db'
 import { corsHeaders, json, makeId, mapCourier, mapDelivery, mapMaterial, mapOrder, mapSupplier, readBody } from '../../../lib/helpers'
 
-export async function OPTIONS() {
-  return new Response(null, { status: 204, headers: corsHeaders() })
+export const dynamic = 'force-dynamic'
+
+export async function OPTIONS(request) {
+  return new Response(null, { status: 204, headers: corsHeaders(request) })
 }
 
 export async function GET(request, context) {
   try {
     const path = '/' + (context.params.path || []).join('/')
 
-    if (path === '/health') return json({ ok: true, message: 'Backend aktif' })
+    if (path === '/health') return json({ ok: true, message: 'Backend aktif', frontendUrl: process.env.FRONTEND_URL || null })
     if (path === '/db-test') {
       await initDb()
       const rows = await query('SELECT 1 AS ok')

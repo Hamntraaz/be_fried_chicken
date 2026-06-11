@@ -5,12 +5,17 @@ export function json(data, status = 200) {
   })
 }
 
-export function corsHeaders() {
-  const origin = process.env.FRONTEND_URL || '*'
+export function corsHeaders(request) {
+  const allowedOrigin = process.env.FRONTEND_URL || '*'
+  const requestOrigin = request?.headers?.get?.('origin')
+  const origin = allowedOrigin === '*' ? '*' : allowedOrigin
+
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
   }
 }
 
