@@ -1,103 +1,38 @@
-export function json(data, status = 200) {
-  return Response.json(data, {
-    status,
-    headers: corsHeaders(),
-  })
-}
-
-export function corsHeaders(request) {
-  const allowedOrigin = process.env.FRONTEND_URL || '*'
-  const requestOrigin = request?.headers?.get?.('origin')
-  const origin = allowedOrigin === '*' ? '*' : allowedOrigin
-
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  }
-}
-
-export async function readBody(request) {
-  try { return await request.json() } catch { return {} }
-}
-
-export function makeId(prefix) {
-  const now = Date.now().toString().slice(-6)
+export function makeCode(prefix) {
+  const stamp = Date.now().toString().slice(-6)
   const rand = Math.floor(Math.random() * 900 + 100)
-  return `${prefix}-${now}${rand}`
+  return `${prefix}-${stamp}${rand}`
 }
 
-export function mapMaterial(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    stock: Number(row.stock),
-    minStock: Number(row.min_stock),
-    unit: row.unit,
-    supplier: row.supplier,
-    status: Number(row.stock) < Number(row.min_stock) ? 'Menipis' : 'Aman',
+export function initials(name = 'RF') {
+  return String(name)
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() || '')
+    .join('') || 'RF'
+}
+
+export function formatDate(value) {
+  if (!value) return '-'
+  try {
+    return new Date(value).toLocaleString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return String(value)
   }
 }
 
-export function mapOrder(row) {
-  return {
-    id: row.id,
-    material: row.material,
-    qty: Number(row.qty),
-    unit: row.unit,
-    supplier: row.supplier,
-    courier: row.courier || 'Belum ditugaskan',
-    courierId: row.courier_id,
-    status: row.status,
-    priority: row.priority,
-    eta: row.eta,
-    createdAt: new Date(row.created_at).toLocaleString('id-ID'),
-    branch: row.branch,
-  }
+export function materialStatus(stock, minimumStock) {
+  return Number(stock || 0) < Number(minimumStock || 0) ? 'Menipis' : 'Aman'
 }
 
-export function mapCourier(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    supplier: row.supplier,
-    phone: row.phone,
-    vehicle: row.vehicle,
-    plate: row.plate,
-    status: row.status,
-  }
-}
-
-export function mapSupplier(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    phone: row.phone,
-    address: row.address,
-    status: row.status,
-    score: row.score,
-  }
-}
-
-export function mapDelivery(row) {
-  return {
-    id: row.id,
-    orderId: row.order_id,
-    courierId: row.courier_id,
-    pickup: row.pickup,
-    destination: row.destination,
-    material: row.material,
-    status: row.status,
-    eta: row.eta,
-    distance: row.distance,
-    progress: row.progress,
-    latitude: row.latitude ? Number(row.latitude) : null,
-    longitude: row.longitude ? Number(row.longitude) : null,
-    proofPhoto: row.proof_photo,
-    proofNote: row.proof_note,
-  }
+export function toNumber(value, fallback = 0) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
 }

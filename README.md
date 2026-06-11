@@ -1,12 +1,11 @@
-# Backend Next.js - Rafiza Fried Chicken
+# Backend Next.js Rafiza - Endpoint Terpisah
 
-Endpoint utama:
-- GET `/api/health` untuk cek server aktif tanpa database
-- GET `/api/db-test` untuk cek koneksi MySQL
-- POST `/api/login`
-- GET `/api/overview`
+Backend ini dibuat untuk FE React/Vite Rafiza Fried Chicken.
+Endpoint sudah dipisah di `src/pages/api/*.js`, bukan catch-all `[...path]`.
 
-## Railway Variables wajib
+## Railway Variables
+
+Tambahkan di service backend Railway:
 
 ```env
 DATABASE_URL=${{MySQL.MYSQL_URL}}
@@ -14,12 +13,29 @@ FRONTEND_URL=https://rafiza-fried-chicken.vercel.app
 JWT_SECRET=rafiza_secret_key
 ```
 
-Setelah variable diubah, klik **Deploy / Redeploy** di Railway.
+> Backend juga membaca `MYSQL_URL` sebagai fallback, tetapi yang disarankan tetap `DATABASE_URL`.
 
 ## Vercel Frontend Variable
 
 ```env
-VITE_API_BASE_URL=https://DOMAIN-BACKEND-RAILWAY/api
+VITE_API_BASE_URL=https://domain-backend-railway.up.railway.app/api
 ```
 
-Domain backend harus diambil dari Railway > backend service > Settings > Networking/Public Domain.
+## Public Networking Railway
+
+Gunakan port `3000`, lalu Generate Domain.
+
+## Akun Login Default
+
+- admin@gmail.com / 12345678
+- supplier@gmail.com / 12345678
+- kurir@gmail.com / 12345678
+- manager@gmail.com / 12345678
+
+## Tes Backend
+
+Buka:
+
+```txt
+https://domain-backend-railway.up.railway.app/api/health
+```

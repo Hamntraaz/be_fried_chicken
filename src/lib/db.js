@@ -3,12 +3,34 @@ import mysql from 'mysql2/promise'
 let pool
 let initialized = false
 
+function buildDatabaseUrlFromParts() {
+  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST
+  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || 3306
+  const user = process.env.MYSQLUSER || process.env.MYSQL_USER || 'root'
+  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_ROOT_PASSWORD || process.env.MYSQL_PASSWORD || ''
+  const database = process.env.MYSQLDATABASE || process.env.MYSQL_DATABASE || 'railway'
+  if (!host) return ''
+  return `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`
+}
+
+export function getDatabaseUrl() {
+  return process.env.DATABASE_URL || process.env.MYSQL_URL || process.env.MYSQL_PUBLIC_URL || buildDatabaseUrlFromParts()
+}
+
 export function getPool() {
   if (!pool) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error('DATABASE_URL belum diatur')
+    const databaseUrl = getDatabaseUrl()
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL / MYSQL_URL belum diatur di Railway Variables')
     }
-    pool = mysql.createPool(process.env.DATABASE_URL)
+
+    pool = mysql.createPool(databaseUrl, {
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      decimalNumbers: true,
+      multipleStatements: false,
+    })
   }
   return pool
 }
@@ -21,110 +43,137 @@ export async function query(sql, params = []) {
 export async function initDb() {
   if (initialized) return
 
-  await query(`CREATE TABLE IF NOT EXISTS users (
+  await query(`CREATE TABLE IF NOT EXISTS rfz_warehouses (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(120) NOT NULL,
-    email VARCHAR(120) NOT NULL UNIQUE,
-    password VARCHAR(120) NOT NULL,
-    role VARCHAR(30) NOT NULL,
-    role_name VARCHAR(80),
-    branch VARCHAR(120),
-    avatar VARCHAR(10),
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`)
-
-  await query(`CREATE TABLE IF NOT EXISTS materials (
-    id VARCHAR(30) PRIMARY KEY,
-    name VARCHAR(120) NOT NULL,
-    category VARCHAR(80),
-    stock DECIMAL(12,2) DEFAULT 0,
-    min_stock DECIMAL(12,2) DEFAULT 0,
-    unit VARCHAR(30),
-    supplier VARCHAR(120),
+    code VARCHAR(40) UNIQUE,
+    name VARCHAR(160) NOT NULL,
+    address TEXT,
+    status VARCHAR(40) DEFAULT 'Aktif',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
 
-  await query(`CREATE TABLE IF NOT EXISTS suppliers (
-    id VARCHAR(30) PRIMARY KEY,
-    name VARCHAR(120) NOT NULL,
-    category VARCHAR(100),
-    phone VARCHAR(50),
+  await query(`CREATE TABLE IF NOT EXISTS rfz_suppliers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(40) UNIQUE,
+    name VARCHAR(160) NOT NULL,
+    material_type VARCHAR(160),
+    material_unit VARCHAR(40),
+    phone VARCHAR(60),
     address TEXT,
-    status VARCHAR(30) DEFAULT 'Aktif',
+    status VARCHAR(40) DEFAULT 'Aktif',
     score INT DEFAULT 90,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
 
-  await query(`CREATE TABLE IF NOT EXISTS couriers (
-    id VARCHAR(30) PRIMARY KEY,
-    name VARCHAR(120) NOT NULL,
-    supplier VARCHAR(120),
-    phone VARCHAR(50),
-    vehicle VARCHAR(80),
-    plate VARCHAR(40),
-    status VARCHAR(50) DEFAULT 'Tersedia',
+  await query(`CREATE TABLE IF NOT EXISTS rfz_materials (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(40) UNIQUE,
+    name VARCHAR(160) NOT NULL,
+    category VARCHAR(100),
+    stock DECIMAL(12,2) DEFAULT 0,
+    minimum_stock DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
 
-  await query(`CREATE TABLE IF NOT EXISTS purchase_orders (
-    id VARCHAR(40) PRIMARY KEY,
-    material VARCHAR(120) NOT NULL,
-    qty DECIMAL(12,2) NOT NULL,
-    unit VARCHAR(30),
-    supplier VARCHAR(120),
-    courier VARCHAR(120) DEFAULT 'Belum ditugaskan',
-    courier_id VARCHAR(30),
-    status VARCHAR(60) DEFAULT 'Menunggu Konfirmasi',
-    priority VARCHAR(30) DEFAULT 'Normal',
-    eta VARCHAR(50) DEFAULT '-',
-    branch VARCHAR(120) DEFAULT 'Gudang Utama Rafiza',
+  await query(`CREATE TABLE IF NOT EXISTS rfz_couriers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(40) UNIQUE,
+    supplier_id INT,
+    name VARCHAR(160) NOT NULL,
+    phone VARCHAR(60),
+    vehicle_plate VARCHAR(80),
+    status VARCHAR(60) DEFAULT 'Tersedia',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`)
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(160) NOT NULL,
+    email VARCHAR(160) NOT NULL UNIQUE,
+    password VARCHAR(160) NOT NULL,
+    role VARCHAR(40) NOT NULL,
+    role_name VARCHAR(100),
+    branch VARCHAR(160),
+    avatar VARCHAR(12),
+    description TEXT,
+    supplier_id INT NULL,
+    courier_id INT NULL,
+    warehouse_id INT NULL,
+    status VARCHAR(40) DEFAULT 'Aktif',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`)
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(60) UNIQUE,
+    material_id INT,
+    supplier_id INT,
+    warehouse_id INT,
+    courier_id INT NULL,
+    quantity DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
+    status VARCHAR(80) DEFAULT 'Menunggu Konfirmasi Supplier',
+    notes TEXT,
+    destination_lat DECIMAL(11,8),
+    destination_lng DECIMAL(11,8),
+    destination_address TEXT,
+    ordered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`)
+
+  await query(`CREATE TABLE IF NOT EXISTS rfz_deliveries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(60) UNIQUE,
+    order_id INT NOT NULL,
+    courier_id INT,
+    status VARCHAR(80) DEFAULT 'Menunggu Persetujuan Kurir',
     pickup_lat DECIMAL(11,8),
     pickup_lng DECIMAL(11,8),
     pickup_address TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  )`)
-
-  await query(`CREATE TABLE IF NOT EXISTS deliveries (
-    id VARCHAR(40) PRIMARY KEY,
-    order_id VARCHAR(40) NOT NULL,
-    courier_id VARCHAR(30),
-    pickup VARCHAR(120),
-    destination VARCHAR(120) DEFAULT 'Gudang Utama Rafiza',
-    material VARCHAR(160),
-    status VARCHAR(60) DEFAULT 'Menunggu Kurir',
-    eta VARCHAR(50) DEFAULT '-',
-    distance VARCHAR(50) DEFAULT '-',
+    destination_lat DECIMAL(11,8),
+    destination_lng DECIMAL(11,8),
+    destination_address TEXT,
+    current_lat DECIMAL(11,8),
+    current_lng DECIMAL(11,8),
     progress INT DEFAULT 0,
-    latitude DECIMAL(11,8),
-    longitude DECIMAL(11,8),
     proof_photo TEXT,
     proof_note TEXT,
+    proof_uploaded_at TIMESTAMP NULL,
+    reject_reason TEXT,
+    reject_proof TEXT,
+    recorded_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
 
-  await query(`CREATE TABLE IF NOT EXISTS actor_locations (
+  await query(`CREATE TABLE IF NOT EXISTS rfz_movements (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT,
-    role VARCHAR(30),
-    latitude DECIMAL(11,8),
-    longitude DECIMAL(11,8),
-    accuracy DECIMAL(10,2),
+    material_id INT,
+    order_id INT NULL,
+    movement_type VARCHAR(20),
+    source_type VARCHAR(80),
+    quantity DECIMAL(12,2) DEFAULT 0,
+    unit VARCHAR(40),
+    stock_before DECIMAL(12,2) DEFAULT 0,
+    stock_after DECIMAL(12,2) DEFAULT 0,
+    notes TEXT,
+    created_by VARCHAR(160),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`)
 
-  await query(`CREATE TABLE IF NOT EXISTS production_usages (
+  await query(`CREATE TABLE IF NOT EXISTS rfz_actor_locations (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    material_id VARCHAR(30),
-    material VARCHAR(120),
-    qty DECIMAL(12,2),
-    unit VARCHAR(30),
-    note TEXT,
+    user_id INT,
+    role VARCHAR(40),
+    latitude DECIMAL(11,8),
+    longitude DECIMAL(11,8),
+    accuracy DECIMAL(10,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`)
 
@@ -133,53 +182,67 @@ export async function initDb() {
 }
 
 async function seedDb() {
-  const users = await query('SELECT COUNT(*) AS total FROM users')
-  if (users[0].total === 0) {
-    await query(`INSERT INTO users (name,email,password,role,role_name,branch,avatar,description) VALUES
-      ('Nadia Putri','admin@gmail.com','12345678','admin','Admin Gudang','Gudang Utama Rafiza','AG','Mengelola stok bahan baku, membuat pesanan pembelian, dan mengonfirmasi barang diterima.'),
-      ('Supplier Ayam Segar','supplier@gmail.com','12345678','supplier','Supplier','PT Ayam Segar Mandiri','SP','Menerima pesanan bahan baku, memproses pesanan, dan menugaskan kurir.'),
-      ('Andi Pratama','kurir@gmail.com','12345678','courier','Kurir','Kurir Mitra Supplier','KR','Melihat tugas pengiriman, memperbarui status perjalanan, dan menyelesaikan pengantaran.'),
-      ('Rafiza Management','manager@gmail.com','12345678','manager','Manajemen','Head Office Rafiza','MG','Memantau performa stok, pesanan, supplier, kurir, dan laporan operasional.')`)
+  const warehouseCount = await query('SELECT COUNT(*) AS total FROM rfz_warehouses')
+  if (warehouseCount[0].total === 0) {
+    await query(`INSERT INTO rfz_warehouses (id,code,name,address,status) VALUES
+      (1,'WH-001','Gudang Utama Rafiza','Jl. Operasional Rafiza Pusat','Aktif'),
+      (2,'WH-002','Cabang Rafiza Timur','Area outlet timur','Aktif')`)
   }
 
-  const materials = await query('SELECT COUNT(*) AS total FROM materials')
-  if (materials[0].total === 0) {
-    await query(`INSERT INTO materials (id,name,category,stock,min_stock,unit,supplier) VALUES
-      ('BB-001','Ayam Potong','Protein',35,50,'Kg','PT Ayam Segar Mandiri'),
-      ('BB-002','Tepung Bumbu Krispy','Bumbu',120,45,'Kg','UD Bumbu Crispy'),
-      ('BB-003','Minyak Goreng','Minyak',25,35,'Liter','CV Sumber Minyak'),
-      ('BB-004','Sambal Geprek','Saus',62,25,'Pack','Dapur Sambal Nusantara'),
-      ('BB-005','Beras Premium','Karbohidrat',80,50,'Kg','Toko Beras Makmur')`)
+  const supplierCount = await query('SELECT COUNT(*) AS total FROM rfz_suppliers')
+  if (supplierCount[0].total === 0) {
+    await query(`INSERT INTO rfz_suppliers (id,code,name,material_type,material_unit,phone,address,status,score) VALUES
+      (1,'SUP-001','PT Ayam Segar Mandiri','Ayam Potong','Kg','0811-1111-1111','Jakarta Timur','Aktif',96),
+      (2,'SUP-002','UD Bumbu Crispy','Tepung Bumbu Krispy','Kg','0833-3333-3333','Bekasi','Aktif',91),
+      (3,'SUP-003','CV Sumber Minyak','Minyak Goreng','Liter','0822-2222-2222','Tangerang','Aktif',88)`) 
   }
 
-  const suppliers = await query('SELECT COUNT(*) AS total FROM suppliers')
-  if (suppliers[0].total === 0) {
-    await query(`INSERT INTO suppliers (id,name,category,phone,address,status,score) VALUES
-      ('SUP-001','PT Ayam Segar Mandiri','Ayam Potong','0811-1111-1111','Jakarta Timur','Aktif',96),
-      ('SUP-002','UD Bumbu Crispy','Tepung Bumbu','0833-3333-3333','Bekasi','Aktif',91),
-      ('SUP-003','CV Sumber Minyak','Minyak Goreng','0822-2222-2222','Tangerang','Aktif',88)`)
+  const materialCount = await query('SELECT COUNT(*) AS total FROM rfz_materials')
+  if (materialCount[0].total === 0) {
+    await query(`INSERT INTO rfz_materials (id,code,name,category,stock,minimum_stock,unit) VALUES
+      (1,'BB-001','Ayam Potong','Protein',35,50,'Kg'),
+      (2,'BB-002','Tepung Bumbu Krispy','Bumbu',120,45,'Kg'),
+      (3,'BB-003','Minyak Goreng','Minyak',25,35,'Liter'),
+      (4,'BB-004','Sambal Geprek','Saus',62,25,'Pack'),
+      (5,'BB-005','Beras Premium','Karbohidrat',80,50,'Kg')`)
   }
 
-  const couriers = await query('SELECT COUNT(*) AS total FROM couriers')
-  if (couriers[0].total === 0) {
-    await query(`INSERT INTO couriers (id,name,supplier,phone,vehicle,plate,status) VALUES
-      ('KUR-001','Andi Pratama','PT Ayam Segar Mandiri','0812-3344-5566','Motor Box','B 1234 RFC','Dalam Pengiriman'),
-      ('KUR-002','Budi Santoso','UD Bumbu Crispy','0821-4455-6677','Motor Box','B 7788 RFC','Tersedia'),
-      ('KUR-003','Rian Nugroho','CV Sumber Minyak','0856-1122-3344','Pickup','B 9012 RFC','Tersedia')`)
+  const courierCount = await query('SELECT COUNT(*) AS total FROM rfz_couriers')
+  if (courierCount[0].total === 0) {
+    await query(`INSERT INTO rfz_couriers (id,code,supplier_id,name,phone,vehicle_plate,status) VALUES
+      (1,'KUR-001',1,'Andi Pratama','0812-3344-5566','B 1234 RFC','Tersedia'),
+      (2,'KUR-002',2,'Budi Santoso','0821-4455-6677','B 7788 RFC','Tersedia'),
+      (3,'KUR-003',3,'Rian Nugroho','0856-1122-3344','B 9012 RFC','Tersedia')`)
   }
 
-  const orders = await query('SELECT COUNT(*) AS total FROM purchase_orders')
-  if (orders[0].total === 0) {
-    await query(`INSERT INTO purchase_orders (id,material,qty,unit,supplier,courier,courier_id,status,priority,eta,branch) VALUES
-      ('PO-RFZ-001','Ayam Potong',100,'Kg','PT Ayam Segar Mandiri','Andi Pratama','KUR-001','Dalam Perjalanan','Tinggi','18 menit','Outlet Rafiza Pusat'),
-      ('PO-RFZ-002','Minyak Goreng',50,'Liter','CV Sumber Minyak','Belum ditugaskan',NULL,'Diproses Supplier','Sedang','-','Outlet Rafiza Pusat'),
-      ('PO-RFZ-003','Tepung Bumbu Krispy',80,'Kg','UD Bumbu Crispy','Budi Santoso','KUR-002','Selesai','Normal','Diterima','Outlet Rafiza Pusat')`)
+  const userCount = await query('SELECT COUNT(*) AS total FROM rfz_users')
+  if (userCount[0].total === 0) {
+    await query(`INSERT INTO rfz_users (id,name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,warehouse_id,status) VALUES
+      (1,'Nadia Putri','admin@gmail.com','12345678','admin','Admin Gudang','Gudang Utama Rafiza','AG','Mengelola stok bahan baku, membuat pesanan pembelian, dan mengonfirmasi barang diterima.',NULL,NULL,1,'Aktif'),
+      (2,'Supplier Ayam Segar','supplier@gmail.com','12345678','supplier','Supplier','PT Ayam Segar Mandiri','SP','Menerima pesanan bahan baku, memproses pesanan, dan menugaskan kurir.',1,NULL,NULL,'Aktif'),
+      (3,'Andi Pratama','kurir@gmail.com','12345678','courier','Kurir','Kurir Mitra Supplier','KR','Melihat tugas pengiriman, memperbarui status perjalanan, dan menyelesaikan pengantaran.',1,1,NULL,'Aktif'),
+      (4,'Rafiza Management','manager@gmail.com','12345678','manager','Manajemen','Head Office Rafiza','MG','Memantau performa stok, pesanan, supplier, kurir, dan laporan operasional.',NULL,NULL,NULL,'Aktif')`)
   }
 
-  const deliveries = await query('SELECT COUNT(*) AS total FROM deliveries')
-  if (deliveries[0].total === 0) {
-    await query(`INSERT INTO deliveries (id,order_id,courier_id,pickup,destination,material,status,eta,distance,progress) VALUES
-      ('DLV-001','PO-RFZ-001','KUR-001','PT Ayam Segar Mandiri','Gudang Utama Rafiza','Ayam Potong 100 Kg','Dalam Perjalanan','18 menit','5.4 km',62),
-      ('DLV-002','PO-RFZ-003','KUR-002','UD Bumbu Crispy','Gudang Utama Rafiza','Tepung Bumbu 80 Kg','Selesai','Diterima','7.2 km',100)`)
+  const orderCount = await query('SELECT COUNT(*) AS total FROM rfz_orders')
+  if (orderCount[0].total === 0) {
+    await query(`INSERT INTO rfz_orders (id,code,material_id,supplier_id,warehouse_id,courier_id,quantity,unit,status,notes,destination_address) VALUES
+      (1,'PO-RFZ-001',1,1,1,1,100,'Kg','Menunggu Persetujuan Kurir','Order ayam potong untuk stok pusat','Gudang Utama Rafiza'),
+      (2,'PO-RFZ-002',3,3,1,NULL,50,'Liter','Menunggu Konfirmasi Supplier','Order minyak goreng','Gudang Utama Rafiza'),
+      (3,'PO-RFZ-003',2,2,1,2,80,'Kg','Pesanan Diterima','Order tepung selesai','Gudang Utama Rafiza')`)
+  }
+
+  const deliveryCount = await query('SELECT COUNT(*) AS total FROM rfz_deliveries')
+  if (deliveryCount[0].total === 0) {
+    await query(`INSERT INTO rfz_deliveries (id,code,order_id,courier_id,status,pickup_address,destination_address,current_lat,current_lng,progress,recorded_at) VALUES
+      (1,'DLV-001',1,1,'Menunggu Persetujuan Kurir','PT Ayam Segar Mandiri','Gudang Utama Rafiza',NULL,NULL,10,NOW()),
+      (2,'DLV-002',3,2,'Pengiriman Selesai','UD Bumbu Crispy','Gudang Utama Rafiza',NULL,NULL,100,NOW())`)
+  }
+
+  const movementCount = await query('SELECT COUNT(*) AS total FROM rfz_movements')
+  if (movementCount[0].total === 0) {
+    await query(`INSERT INTO rfz_movements (material_id,order_id,movement_type,source_type,quantity,unit,stock_before,stock_after,notes,created_by) VALUES
+      (2,3,'IN','Barang Masuk Supplier',80,'Kg',40,120,'Penerimaan PO-RFZ-003','System'),
+      (1,NULL,'OUT','Produksi Harian',15,'Kg',50,35,'Produksi ayam crispy shift pagi','System')`)
   }
 }
