@@ -1,11 +1,11 @@
 {
-  "name": "be-nextjs-rafiza-railway-ready",
+  "name": "be-nextjs-rafiza-vercel",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p ${PORT:-3000}",
+    "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
@@ -17,6 +17,6 @@
   },
   "devDependencies": {},
   "engines": {
-    "node": ">=18 <23"
+    "node": "18.x"
   }
 }
