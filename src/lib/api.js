@@ -1,4 +1,4 @@
-import { initDb } from './db'
+import { initDb, query } from './db'
 
 function normalizeUrl(value = '') {
   return String(value || '').trim().replace(/\/$/, '')
@@ -20,6 +20,43 @@ export function ok(data = {}, status = 200) {
   return { status, data }
 }
 
+function extractBearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || ''
+  const raw = String(header || '').replace(/^Bearer\s+/i, '').trim()
+  return raw || ''
+}
+
+export async function getAuthUser(req) {
+  const token = extractBearerToken(req)
+  if (!token) return null
+
+  // Demo token format: rafiza-token-<userId>-<timestamp>
+  const match = token.match(/^rafiza-token-(\d+)(?:-|$)/)
+  if (!match) return null
+
+  const userId = Number(match[1])
+  if (!userId) return null
+
+  const rows = await query(`SELECT u.*, s.name AS supplier_name, w.name AS warehouse_name, b.name AS branch_name, c.name AS courier_name
+    FROM rfz_users u
+    LEFT JOIN rfz_suppliers s ON s.id = u.supplier_id
+    LEFT JOIN rfz_warehouses w ON w.id = u.warehouse_id
+    LEFT JOIN rfz_branches b ON b.id = u.branch_id
+    LEFT JOIN rfz_couriers c ON c.id = u.courier_id
+    WHERE u.id = ?
+    LIMIT 1`, [userId])
+  const user = rows[0]
+  if (!user || user.status === 'Nonaktif') return null
+
+  return {
+    ...user,
+    role: user.role === 'admin' ? 'warehouse' : user.role,
+    courier_type: user.role === 'courier'
+      ? (user.supplier_id ? 'supplier' : user.warehouse_id ? 'warehouse' : null)
+      : null,
+  }
+}
+
 export function withApi(allowedMethods, handler) {
   return async function apiHandler(req, res) {
     setCors(req, res)
@@ -35,6 +72,7 @@ export function withApi(allowedMethods, handler) {
 
     try {
       await initDb()
+      req.auth = await getAuthUser(req)
       const result = await handler(req, res)
       if (res.writableEnded) return
 

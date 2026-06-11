@@ -27,6 +27,7 @@ function mapUser(row) {
     warehouse_name: row.warehouse_name,
     branch_name: row.branch_name,
     courier_name: row.courier_name,
+    courier_type: safeRole(row.role) === 'courier' ? (row.supplier_id ? 'supplier' : row.warehouse_id ? 'warehouse' : null) : null,
   }
 }
 
@@ -98,6 +99,7 @@ function mapCourier(row) {
     plate: row.vehicle_plate,
     status: row.status,
     initials: initials(row.name),
+    courier_type: row.supplier_id ? 'supplier' : row.warehouse_id ? 'warehouse' : null,
   }
 }
 
@@ -252,6 +254,100 @@ function mapBranchSale(row) {
   }
 }
 
+
+function sameId(a, b) {
+  if (a === null || a === undefined || b === null || b === undefined) return false
+  return String(a) === String(b)
+}
+
+function isManager(auth) { return auth?.role === 'manager' }
+function isSupplier(auth) { return auth?.role === 'supplier' && auth?.supplier_id }
+function isWarehouse(auth) { return (auth?.role === 'warehouse' || auth?.role === 'admin') && auth?.warehouse_id }
+function isBranch(auth) { return auth?.role === 'branch' && auth?.branch_id }
+function isCourier(auth) { return auth?.role === 'courier' && auth?.courier_id }
+function courierTypeOf(auth) { return auth?.courier_type || (auth?.supplier_id ? 'supplier' : auth?.warehouse_id ? 'warehouse' : null) }
+
+function scopeOverview(data, auth) {
+  if (!auth || isManager(auth)) return data
+
+  const copy = { ...data }
+  const deliveries = data.deliveries || []
+  const branchRequests = data.branch_requests || []
+  const orders = data.orders || []
+  const couriers = data.couriers || []
+  const users = data.users || []
+
+  if (isSupplier(auth)) {
+    copy.orders = orders.filter((item) => sameId(item.supplier_id, auth.supplier_id))
+    copy.deliveries = deliveries.filter((item) => sameId(item.supplier_id, auth.supplier_id))
+    copy.couriers = couriers.filter((item) => sameId(item.supplier_id, auth.supplier_id))
+    copy.branch_requests = []
+    copy.branch_stocks = []
+    copy.branch_sales = []
+    copy.users = users.filter((item) => sameId(item.id, auth.id) || sameId(item.supplier_id, auth.supplier_id))
+    return copy
+  }
+
+  if (isWarehouse(auth)) {
+    copy.orders = orders.filter((item) => !item.warehouse_id || sameId(item.warehouse_id, auth.warehouse_id))
+    copy.deliveries = deliveries.filter((item) => !item.warehouse_id || sameId(item.warehouse_id, auth.warehouse_id))
+    copy.couriers = couriers.filter((item) => sameId(item.warehouse_id, auth.warehouse_id))
+    copy.branch_requests = branchRequests.filter((item) => !item.warehouse_id || sameId(item.warehouse_id, auth.warehouse_id))
+    copy.users = users.filter((item) => sameId(item.id, auth.id) || sameId(item.warehouse_id, auth.warehouse_id) || item.role === 'branch')
+    return copy
+  }
+
+  if (isBranch(auth)) {
+    copy.orders = []
+    copy.deliveries = []
+    copy.branch_requests = branchRequests.filter((item) => sameId(item.branch_id, auth.branch_id))
+    copy.branch_stocks = (data.branch_stocks || []).filter((item) => sameId(item.branch_id, auth.branch_id))
+    copy.branch_sales = (data.branch_sales || []).filter((item) => sameId(item.branch_id, auth.branch_id))
+    const relatedCourierIds = new Set(copy.branch_requests.map((item) => String(item.courier_id || '')).filter(Boolean))
+    copy.couriers = couriers.filter((item) => relatedCourierIds.has(String(item.id)))
+    copy.users = users.filter((item) => sameId(item.id, auth.id) || sameId(item.branch_id, auth.branch_id))
+    return copy
+  }
+
+  if (isCourier(auth)) {
+    const myDeliveryIds = new Set(deliveries.filter((item) => sameId(item.courier_id, auth.courier_id)).map((item) => String(item.id)))
+    const myOrderIds = new Set(deliveries.filter((item) => sameId(item.courier_id, auth.courier_id)).map((item) => String(item.order_id)))
+    copy.deliveries = deliveries.filter((item) => myDeliveryIds.has(String(item.id)))
+    copy.orders = orders.filter((item) => myOrderIds.has(String(item.id)))
+    copy.branch_requests = branchRequests.filter((item) => sameId(item.courier_id, auth.courier_id))
+    copy.couriers = couriers.filter((item) => sameId(item.id, auth.courier_id))
+    copy.users = users.filter((item) => sameId(item.id, auth.id))
+    if (courierTypeOf(auth) === 'supplier') {
+      copy.branch_requests = []
+    }
+    if (courierTypeOf(auth) === 'warehouse') {
+      copy.deliveries = []
+      copy.orders = []
+    }
+    return copy
+  }
+
+  return copy
+}
+
+function canAccessSupplierDelivery(auth, delivery) {
+  if (!auth) return true
+  if (isManager(auth)) return true
+  if (isSupplier(auth)) return sameId(delivery?.supplier_id, auth.supplier_id)
+  if (isWarehouse(auth)) return !delivery?.warehouse_id || sameId(delivery.warehouse_id, auth.warehouse_id)
+  if (isCourier(auth)) return sameId(delivery?.courier_id, auth.courier_id) && courierTypeOf(auth) === 'supplier'
+  return false
+}
+
+function canAccessBranchRequest(auth, row) {
+  if (!auth) return true
+  if (isManager(auth)) return true
+  if (isWarehouse(auth)) return !row?.warehouse_id || sameId(row.warehouse_id, auth.warehouse_id)
+  if (isBranch(auth)) return sameId(row?.branch_id, auth.branch_id)
+  if (isCourier(auth)) return sameId(row?.courier_id, auth.courier_id) && courierTypeOf(auth) === 'warehouse'
+  return false
+}
+
 async function overviewRows() {
   const materials = await query('SELECT * FROM rfz_materials ORDER BY id')
   const suppliers = await query('SELECT * FROM rfz_suppliers ORDER BY id')
@@ -334,7 +430,8 @@ function buildNotifications({ orders, deliveries, branchRequests }) {
   return notifications
 }
 
-export async function getOverview() {
+export async function getOverview(req) {
+  const auth = req?.auth || null
   const rows = await overviewRows()
   const materials = rows.materials.map(mapMaterial)
   const suppliers = rows.suppliers.map(mapSupplier)
@@ -353,7 +450,7 @@ export async function getOverview() {
   const completedOrders = orders.filter((item) => ['Pesanan Diterima', 'Selesai'].includes(item.status)).length
   const pendingBranchRequests = branch_requests.filter((item) => item.status === 'Menunggu Persetujuan Gudang').length
 
-  const data = {
+  let data = {
     summary: {
       total_materials: materials.length,
       total_suppliers: suppliers.filter((item) => item.status !== 'Nonaktif').length,
@@ -400,6 +497,16 @@ export async function getOverview() {
     ],
   }
 
+  data = scopeOverview(data, auth)
+  data.summary = {
+    ...data.summary,
+    total_couriers: data.couriers.length,
+    total_orders: data.orders.length,
+    active_deliveries: data.deliveries.filter((item) => !['Pengiriman Selesai', 'Pesanan Diterima', 'Selesai'].includes(item.status)).length + data.branch_requests.filter((item) => ['Menunggu Persetujuan Kurir', 'Tugas Diterima Kurir', 'Kurir Dalam Perjalanan', 'Driver Sampai'].includes(item.status)).length,
+    completed_orders: data.deliveries.filter((item) => ['Pengiriman Selesai', 'Pesanan Diterima', 'Selesai'].includes(item.status)).length + data.branch_requests.filter((item) => ['Diterima Cabang'].includes(item.status)).length,
+    pending_branch_requests: data.branch_requests.filter((item) => item.status === 'Menunggu Persetujuan Gudang').length,
+  }
+
   return ok({ success: true, data })
 }
 
@@ -415,7 +522,7 @@ export async function login(req) {
   return ok({
     success: true,
     message: 'Login berhasil',
-    token: `rafiza-token-${user.id}`,
+    token: `rafiza-token-${user.id}-${Date.now()}`,
     user: mapUser(user),
   })
 }
@@ -440,7 +547,8 @@ export async function createPurchaseOrder(req) {
   const body = req.body || {}
   const materialId = Number(body.material_id || body.materialId || 0)
   const supplierId = Number(body.supplier_id || body.supplierId || 0)
-  const warehouseId = Number(body.warehouse_id || body.warehouseId || 1)
+  const auth = req.auth || null
+  const warehouseId = isWarehouse(auth) ? Number(auth.warehouse_id) : Number(body.warehouse_id || body.warehouseId || 1)
   const quantity = toNumber(body.quantity || body.qty, 0)
 
   if (!materialId || !supplierId || !quantity) {
@@ -479,6 +587,9 @@ export async function supplierConfirmOrder(req) {
   const order = (await query('SELECT * FROM rfz_orders WHERE id=? LIMIT 1', [orderId]))[0]
   const courier = (await query('SELECT * FROM rfz_couriers WHERE id=? LIMIT 1', [courierId]))[0]
   if (!order || !courier) return ok({ success: false, message: 'Order atau kurir tidak ditemukan' }, 404)
+  const auth = req.auth || null
+  if (isSupplier(auth) && !sameId(order.supplier_id, auth.supplier_id)) return ok({ success: false, message: 'Supplier hanya bisa memproses pesanan miliknya sendiri' }, 403)
+  if (!sameId(courier.supplier_id, order.supplier_id) || courier.warehouse_id) return ok({ success: false, message: 'Pilih kurir supplier yang sesuai dengan supplier pesanan ini' }, 400)
 
   await query('UPDATE rfz_orders SET courier_id=?, status=? WHERE id=?', [courierId, 'Menunggu Persetujuan Kurir', orderId])
 
@@ -538,6 +649,7 @@ export async function courierTaskResponse(req) {
     const requestId = branchRequestIdFromBody(body)
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Tugas ini bukan milik akun kurir/gudang/cabang yang login' }, 403)
     if (body.action === 'reject') {
       await query(`UPDATE rfz_branch_requests SET status='Ditolak Kurir', notes=CONCAT(COALESCE(notes,''), ?), updated_at=NOW() WHERE id=?`, [`
 Alasan kurir: ${body.reason || '-'}`, requestId])
@@ -550,8 +662,9 @@ Alasan kurir: ${body.reason || '-'}`, requestId])
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
-  const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
+  const delivery = (await query(`SELECT d.*, o.supplier_id, o.warehouse_id FROM rfz_deliveries d LEFT JOIN rfz_orders o ON o.id=d.order_id WHERE d.id=? LIMIT 1`, [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Tugas ini bukan milik akun kurir/supplier/gudang yang login' }, 403)
 
   if (body.action === 'reject') {
     await query(`UPDATE rfz_deliveries SET status='Ditolak Kurir', reject_reason=?, reject_proof=?, recorded_at=NOW() WHERE id=?`, [body.reason || null, body.proof || null, deliveryId])
@@ -571,14 +684,16 @@ export async function driverStart(req) {
     const requestId = branchRequestIdFromBody(body)
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Tugas distribusi cabang ini bukan milik akun yang login' }, 403)
     await query(`UPDATE rfz_branch_requests SET status='Kurir Dalam Perjalanan', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
     if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Dalam Pengiriman' WHERE id=?`, [reqRow.courier_id])
     return ok({ success: true, message: 'Kurir gudang mulai mengirim barang ke cabang' })
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
-  const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
+  const delivery = (await query(`SELECT d.*, o.supplier_id, o.warehouse_id FROM rfz_deliveries d LEFT JOIN rfz_orders o ON o.id=d.order_id WHERE d.id=? LIMIT 1`, [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Tugas pengiriman ini bukan milik akun yang login' }, 403)
 
   await query(`UPDATE rfz_deliveries SET status='Kurir Dalam Perjalanan', current_lat=?, current_lng=?, progress=45, recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
@@ -596,12 +711,18 @@ export async function updateDeliveryLocation(req) {
   if (isBranchDeliveryBody(body)) {
     const requestId = branchRequestIdFromBody(body)
     if (!requestId) return ok({ success: false, message: 'Request cabang wajib diisi' }, 400)
+    const reqRow = await getBranchRequest(requestId)
+    if (!reqRow) return ok({ success: false, message: 'Request cabang tidak ditemukan' }, 404)
+    if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Lokasi ini bukan milik tugas akun yang login' }, 403)
     await query(`UPDATE rfz_branch_requests SET current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
     return ok({ success: true, message: 'Lokasi distribusi cabang diperbarui' })
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   if (!deliveryId) return ok({ success: false, message: 'Delivery wajib diisi' }, 400)
+  const delivery = (await query(`SELECT d.*, o.supplier_id, o.warehouse_id FROM rfz_deliveries d LEFT JOIN rfz_orders o ON o.id=d.order_id WHERE d.id=? LIMIT 1`, [deliveryId]))[0]
+  if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Lokasi ini bukan milik tugas akun yang login' }, 403)
   await query(`UPDATE rfz_deliveries SET current_lat=?, current_lng=?, progress=GREATEST(progress,60), recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
     body.longitude || null,
@@ -617,13 +738,15 @@ export async function driverArrived(req) {
     const requestId = branchRequestIdFromBody(body)
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Tugas cabang ini bukan milik akun yang login' }, 403)
     await query(`UPDATE rfz_branch_requests SET status='Driver Sampai', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
     return ok({ success: true, message: 'Kurir sampai di cabang. Upload bukti foto untuk menyelesaikan.' })
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
-  const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
+  const delivery = (await query(`SELECT d.*, o.supplier_id, o.warehouse_id FROM rfz_deliveries d LEFT JOIN rfz_orders o ON o.id=d.order_id WHERE d.id=? LIMIT 1`, [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Tugas pengiriman ini bukan milik akun yang login' }, 403)
 
   await query(`UPDATE rfz_deliveries SET status='Driver Sampai', current_lat=?, current_lng=?, progress=90, recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
@@ -644,6 +767,7 @@ export async function deliveryComplete(req) {
     const requestId = branchRequestIdFromBody(body)
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
+    if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Tugas cabang ini bukan milik akun yang login' }, 403)
     if (!proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
     if (reqRow.status === 'Diterima Cabang') return ok({ success: true, message: 'Distribusi cabang sudah selesai sebelumnya' })
 
@@ -671,8 +795,9 @@ export async function deliveryComplete(req) {
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
-  const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
+  const delivery = (await query(`SELECT d.*, o.supplier_id, o.warehouse_id FROM rfz_deliveries d LEFT JOIN rfz_orders o ON o.id=d.order_id WHERE d.id=? LIMIT 1`, [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
+  if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Tugas pengiriman ini bukan milik akun yang login' }, 403)
   if (!proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
   if (delivery.status === 'Pengiriman Selesai') return ok({ success: true, message: 'Pengiriman sudah selesai sebelumnya' })
 
@@ -744,8 +869,11 @@ export async function assignCourier(req) {
 
 export async function createCourier(req) {
   const body = req.body || {}
-  const supplierId = Number(body.supplier_id || body.supplierId || 0) || null
-  const warehouseId = Number(body.warehouse_id || body.warehouseId || 0) || null
+  const auth = req.auth || null
+  let supplierId = Number(body.supplier_id || body.supplierId || 0) || null
+  let warehouseId = Number(body.warehouse_id || body.warehouseId || 0) || null
+  if (isSupplier(auth)) { supplierId = Number(auth.supplier_id); warehouseId = null }
+  if (isWarehouse(auth)) { warehouseId = Number(auth.warehouse_id); supplierId = null }
   if (!supplierId && !warehouseId) return ok({ success: false, message: 'Supplier atau gudang wajib dipilih' }, 400)
   if (!body.name) return ok({ success: false, message: 'Nama kurir wajib diisi' }, 400)
 
@@ -839,7 +967,8 @@ export async function recordProductionUsage(req) {
 
 export async function createBranchRequest(req) {
   const body = req.body || {}
-  const branchId = Number(body.branch_id || body.branchId || 0)
+  const auth = req.auth || null
+  const branchId = isBranch(auth) ? Number(auth.branch_id) : Number(body.branch_id || body.branchId || 0)
   const materialId = Number(body.material_id || body.materialId || 0)
   const quantity = toNumber(body.quantity || body.qty, 0)
   if (!branchId || !materialId || !quantity) return ok({ success: false, message: 'Cabang, barang, dan jumlah wajib diisi' }, 400)
@@ -887,6 +1016,10 @@ Alasan: ${body.reason || body.notes || '-'}`, requester, id])
   if (action === 'send' || action === 'process') {
     const courierId = Number(body.courier_id || body.courierId || 0)
     if (!courierId) return ok({ success: false, message: 'Pilih kurir gudang terlebih dahulu' }, 400)
+    if (isWarehouse(req.auth) && reqRow.warehouse_id && !sameId(reqRow.warehouse_id, req.auth.warehouse_id)) return ok({ success: false, message: 'Gudang hanya bisa memproses permintaan cabang miliknya' }, 403)
+    const courier = (await query('SELECT * FROM rfz_couriers WHERE id=? LIMIT 1', [courierId]))[0]
+    const ownerWarehouseId = reqRow.warehouse_id || req.auth?.warehouse_id
+    if (!courier || !courier.warehouse_id || (ownerWarehouseId && !sameId(courier.warehouse_id, ownerWarehouseId))) return ok({ success: false, message: 'Pilih kurir gudang yang sesuai dengan gudang ini' }, 400)
     const material = (await query('SELECT * FROM rfz_materials WHERE id=? LIMIT 1', [reqRow.material_id]))[0]
     if (!material) return ok({ success: false, message: 'Material tidak ditemukan' }, 404)
     const before = toNumber(material.stock)
