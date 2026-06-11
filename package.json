@@ -1,5 +1,5 @@
 {
-  "name": "be-nextjs-rafiza-separated",
+  "name": "be-nextjs-rafiza-railway-ready",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -17,6 +17,6 @@
   },
   "devDependencies": {},
   "engines": {
-    "node": ">=18"
+    "node": ">=18 <23"
   }
 }
