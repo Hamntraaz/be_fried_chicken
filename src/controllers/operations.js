@@ -637,37 +637,82 @@ export async function driverArrived(req) {
 
 export async function deliveryComplete(req) {
   const body = req.body || {}
+  const proofPhoto = body.proof_photo || body.proofPhoto || null
+  const proofNote = body.proof_note || body.proofNote || null
+
   if (isBranchDeliveryBody(body)) {
     const requestId = branchRequestIdFromBody(body)
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
-    if (!body.proof_photo && !body.proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
-    await query(`UPDATE rfz_branch_requests SET status='Menunggu Konfirmasi Cabang', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), delivered_at=NOW(), updated_at=NOW() WHERE id=?`, [
+    if (!proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
+    if (reqRow.status === 'Diterima Cabang') return ok({ success: true, message: 'Distribusi cabang sudah selesai sebelumnya' })
+
+    const material = (await query('SELECT * FROM rfz_materials WHERE id=? LIMIT 1', [reqRow.material_id]))[0]
+    await query(`INSERT INTO rfz_branch_stocks (branch_id, material_id, stock, unit)
+      VALUES (?,?,?,?)
+      ON DUPLICATE KEY UPDATE stock=stock+VALUES(stock), unit=VALUES(unit)`, [
+      reqRow.branch_id,
+      reqRow.material_id,
+      toNumber(reqRow.quantity),
+      reqRow.unit || material?.unit || '-',
+    ])
+
+    await query(`UPDATE rfz_branch_requests
+      SET status='Diterima Cabang', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), delivered_at=NOW(), updated_at=NOW()
+      WHERE id=?`, [
       body.latitude || null,
       body.longitude || null,
-      body.proof_photo || body.proofPhoto || null,
-      body.proof_note || body.proofNote || null,
+      proofPhoto,
+      proofNote,
       requestId,
     ])
-    return ok({ success: true, message: 'Bukti distribusi cabang tersimpan, menunggu cabang menerima barang' })
+    if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Tersedia' WHERE id=?`, [reqRow.courier_id])
+    return ok({ success: true, message: 'Distribusi cabang selesai. Bukti foto tersimpan dan stok cabang otomatis bertambah.' })
   }
 
   const deliveryId = Number(body.delivery_id || body.deliveryId || 0)
   const delivery = (await query('SELECT * FROM rfz_deliveries WHERE id=? LIMIT 1', [deliveryId]))[0]
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
-  if (!body.proof_photo && !body.proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
+  if (!proofPhoto) return ok({ success: false, message: 'Bukti foto wajib diupload sebelum pengiriman selesai' }, 400)
+  if (delivery.status === 'Pengiriman Selesai') return ok({ success: true, message: 'Pengiriman sudah selesai sebelumnya' })
 
-  await query(`UPDATE rfz_deliveries SET status='Menunggu Konfirmasi Gudang', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), progress=95, recorded_at=NOW() WHERE id=?`, [
+  const order = (await query('SELECT * FROM rfz_orders WHERE id=? LIMIT 1', [delivery.order_id]))[0]
+  if (!order) return ok({ success: false, message: 'Order tidak ditemukan' }, 404)
+  const material = (await query('SELECT * FROM rfz_materials WHERE id=? LIMIT 1', [order.material_id]))[0]
+  if (!material) return ok({ success: false, message: 'Material order tidak ditemukan' }, 404)
+
+  const before = toNumber(material.stock)
+  const qty = toNumber(order.quantity)
+  const after = before + qty
+  await query('UPDATE rfz_materials SET stock=? WHERE id=?', [after, material.id])
+  await query(`INSERT INTO rfz_movements (material_id, order_id, movement_type, source_type, quantity, unit, stock_before, stock_after, notes, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`, [
+    material.id,
+    order.id,
+    'IN',
+    'Barang Masuk Supplier',
+    qty,
+    order.unit || material.unit,
+    before,
+    after,
+    `Penerimaan otomatis dari bukti kurir ${order.code}`,
+    body.created_by || 'Kurir',
+  ])
+
+  await query(`UPDATE rfz_deliveries
+    SET status='Pengiriman Selesai', current_lat=?, current_lng=?, proof_photo=?, proof_note=?, proof_uploaded_at=NOW(), progress=100, recorded_at=NOW()
+    WHERE id=?`, [
     body.latitude || null,
     body.longitude || null,
-    body.proof_photo || body.proofPhoto || null,
-    body.proof_note || body.proofNote || null,
+    proofPhoto,
+    proofNote,
     deliveryId,
   ])
-  await query(`UPDATE rfz_orders SET status='Menunggu Konfirmasi Gudang' WHERE id=?`, [delivery.order_id])
-  return ok({ success: true, message: 'Bukti pengiriman tersimpan, menunggu konfirmasi gudang' })
-}
+  await query(`UPDATE rfz_orders SET status='Pesanan Diterima' WHERE id=?`, [delivery.order_id])
+  if (delivery.courier_id) await query(`UPDATE rfz_couriers SET status='Tersedia' WHERE id=?`, [delivery.courier_id])
 
+  return ok({ success: true, message: 'Pengiriman selesai. Bukti foto tersimpan dan stok gudang otomatis bertambah.' })
+}
 
 export async function receiveOrder(req) {
   const body = req.body || {}
