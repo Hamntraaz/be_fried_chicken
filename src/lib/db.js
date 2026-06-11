@@ -177,72 +177,21 @@ export async function initDb() {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`)
 
+  await normalizeRoleData()
   await seedDb()
   initialized = true
 }
 
+async function normalizeRoleData() {
+  await query(`UPDATE rfz_users
+    SET role='warehouse', role_name='Gudang/Cabang', avatar=COALESCE(NULLIF(avatar,''),'GD'), description='Mengelola stok bahan baku, membuat pesanan pembelian, dan mengonfirmasi barang diterima.'
+    WHERE role='admin'`)
+}
+
 async function seedDb() {
-  const warehouseCount = await query('SELECT COUNT(*) AS total FROM rfz_warehouses')
-  if (warehouseCount[0].total === 0) {
-    await query(`INSERT INTO rfz_warehouses (id,code,name,address,status) VALUES
-      (1,'WH-001','Gudang Utama Rafiza','Jl. Operasional Rafiza Pusat','Aktif'),
-      (2,'WH-002','Cabang Rafiza Timur','Area outlet timur','Aktif')`)
-  }
-
-  const supplierCount = await query('SELECT COUNT(*) AS total FROM rfz_suppliers')
-  if (supplierCount[0].total === 0) {
-    await query(`INSERT INTO rfz_suppliers (id,code,name,material_type,material_unit,phone,address,status,score) VALUES
-      (1,'SUP-001','PT Ayam Segar Mandiri','Ayam Potong','Kg','0811-1111-1111','Jakarta Timur','Aktif',96),
-      (2,'SUP-002','UD Bumbu Crispy','Tepung Bumbu Krispy','Kg','0833-3333-3333','Bekasi','Aktif',91),
-      (3,'SUP-003','CV Sumber Minyak','Minyak Goreng','Liter','0822-2222-2222','Tangerang','Aktif',88)`) 
-  }
-
-  const materialCount = await query('SELECT COUNT(*) AS total FROM rfz_materials')
-  if (materialCount[0].total === 0) {
-    await query(`INSERT INTO rfz_materials (id,code,name,category,stock,minimum_stock,unit) VALUES
-      (1,'BB-001','Ayam Potong','Protein',35,50,'Kg'),
-      (2,'BB-002','Tepung Bumbu Krispy','Bumbu',120,45,'Kg'),
-      (3,'BB-003','Minyak Goreng','Minyak',25,35,'Liter'),
-      (4,'BB-004','Sambal Geprek','Saus',62,25,'Pack'),
-      (5,'BB-005','Beras Premium','Karbohidrat',80,50,'Kg')`)
-  }
-
-  const courierCount = await query('SELECT COUNT(*) AS total FROM rfz_couriers')
-  if (courierCount[0].total === 0) {
-    await query(`INSERT INTO rfz_couriers (id,code,supplier_id,name,phone,vehicle_plate,status) VALUES
-      (1,'KUR-001',1,'Andi Pratama','0812-3344-5566','B 1234 RFC','Tersedia'),
-      (2,'KUR-002',2,'Budi Santoso','0821-4455-6677','B 7788 RFC','Tersedia'),
-      (3,'KUR-003',3,'Rian Nugroho','0856-1122-3344','B 9012 RFC','Tersedia')`)
-  }
-
   const userCount = await query('SELECT COUNT(*) AS total FROM rfz_users')
   if (userCount[0].total === 0) {
-    await query(`INSERT INTO rfz_users (id,name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,warehouse_id,status) VALUES
-      (1,'Nadia Putri','admin@gmail.com','12345678','admin','Admin Gudang','Gudang Utama Rafiza','AG','Mengelola stok bahan baku, membuat pesanan pembelian, dan mengonfirmasi barang diterima.',NULL,NULL,1,'Aktif'),
-      (2,'Supplier Ayam Segar','supplier@gmail.com','12345678','supplier','Supplier','PT Ayam Segar Mandiri','SP','Menerima pesanan bahan baku, memproses pesanan, dan menugaskan kurir.',1,NULL,NULL,'Aktif'),
-      (3,'Andi Pratama','kurir@gmail.com','12345678','courier','Kurir','Kurir Mitra Supplier','KR','Melihat tugas pengiriman, memperbarui status perjalanan, dan menyelesaikan pengantaran.',1,1,NULL,'Aktif'),
-      (4,'Rafiza Management','manager@gmail.com','12345678','manager','Manajemen','Head Office Rafiza','MG','Memantau performa stok, pesanan, supplier, kurir, dan laporan operasional.',NULL,NULL,NULL,'Aktif')`)
-  }
-
-  const orderCount = await query('SELECT COUNT(*) AS total FROM rfz_orders')
-  if (orderCount[0].total === 0) {
-    await query(`INSERT INTO rfz_orders (id,code,material_id,supplier_id,warehouse_id,courier_id,quantity,unit,status,notes,destination_address) VALUES
-      (1,'PO-RFZ-001',1,1,1,1,100,'Kg','Menunggu Persetujuan Kurir','Order ayam potong untuk stok pusat','Gudang Utama Rafiza'),
-      (2,'PO-RFZ-002',3,3,1,NULL,50,'Liter','Menunggu Konfirmasi Supplier','Order minyak goreng','Gudang Utama Rafiza'),
-      (3,'PO-RFZ-003',2,2,1,2,80,'Kg','Pesanan Diterima','Order tepung selesai','Gudang Utama Rafiza')`)
-  }
-
-  const deliveryCount = await query('SELECT COUNT(*) AS total FROM rfz_deliveries')
-  if (deliveryCount[0].total === 0) {
-    await query(`INSERT INTO rfz_deliveries (id,code,order_id,courier_id,status,pickup_address,destination_address,current_lat,current_lng,progress,recorded_at) VALUES
-      (1,'DLV-001',1,1,'Menunggu Persetujuan Kurir','PT Ayam Segar Mandiri','Gudang Utama Rafiza',NULL,NULL,10,NOW()),
-      (2,'DLV-002',3,2,'Pengiriman Selesai','UD Bumbu Crispy','Gudang Utama Rafiza',NULL,NULL,100,NOW())`)
-  }
-
-  const movementCount = await query('SELECT COUNT(*) AS total FROM rfz_movements')
-  if (movementCount[0].total === 0) {
-    await query(`INSERT INTO rfz_movements (material_id,order_id,movement_type,source_type,quantity,unit,stock_before,stock_after,notes,created_by) VALUES
-      (2,3,'IN','Barang Masuk Supplier',80,'Kg',40,120,'Penerimaan PO-RFZ-003','System'),
-      (1,NULL,'OUT','Produksi Harian',15,'Kg',50,35,'Produksi ayam crispy shift pagi','System')`)
+    await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,supplier_id,courier_id,warehouse_id,status) VALUES
+      ('Rafiza Management','manager@gmail.com','12345678','manager','Manager','Head Office Rafiza','MG','Mengelola akun supplier, gudang/cabang, monitoring, dan laporan operasional.',NULL,NULL,NULL,'Aktif')`)
   }
 }

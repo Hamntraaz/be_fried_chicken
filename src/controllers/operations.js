@@ -7,7 +7,7 @@ function mapUser(row) {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: row.role,
+    role: row.role === 'admin' ? 'warehouse' : row.role,
     roleName: row.role_name,
     role_name: row.role_name,
     branch: row.branch,
@@ -17,6 +17,9 @@ function mapUser(row) {
     courier_id: row.courier_id,
     warehouse_id: row.warehouse_id,
     status: row.status,
+    supplier_name: row.supplier_name,
+    warehouse_name: row.warehouse_name,
+    courier_name: row.courier_name,
   }
 }
 
@@ -159,7 +162,12 @@ async function overviewRows() {
   const materials = await query('SELECT * FROM rfz_materials ORDER BY id')
   const suppliers = await query('SELECT * FROM rfz_suppliers ORDER BY id')
   const warehouses = await query('SELECT * FROM rfz_warehouses ORDER BY id')
-  const users = await query('SELECT * FROM rfz_users ORDER BY id')
+  const users = await query(`SELECT u.*, s.name AS supplier_name, w.name AS warehouse_name, c.name AS courier_name
+    FROM rfz_users u
+    LEFT JOIN rfz_suppliers s ON s.id = u.supplier_id
+    LEFT JOIN rfz_warehouses w ON w.id = u.warehouse_id
+    LEFT JOIN rfz_couriers c ON c.id = u.courier_id
+    ORDER BY u.id`)
   const couriers = await query(`SELECT c.*, s.name AS supplier_name FROM rfz_couriers c LEFT JOIN rfz_suppliers s ON s.id = c.supplier_id ORDER BY c.id`)
   const orders = await query(`SELECT o.*, m.name AS material_name, s.name AS supplier_name, s.material_unit, w.name AS warehouse_name, c.name AS courier_name
     FROM rfz_orders o
@@ -193,7 +201,7 @@ function buildNotifications({ orders, deliveries }) {
       notifications.push({ id: `supplier-${order.id}`, role: 'supplier', title: 'Pesanan baru', message: `${order.code} menunggu konfirmasi supplier.` })
     }
     if (String(order.status).includes('Konfirmasi Gudang')) {
-      notifications.push({ id: `admin-${order.id}`, role: 'admin', title: 'Barang tiba', message: `${order.code} menunggu konfirmasi gudang.` })
+      notifications.push({ id: `warehouse-${order.id}`, role: 'warehouse', title: 'Barang tiba', message: `${order.code} menunggu konfirmasi gudang.` })
     }
   }
   for (const delivery of deliveries.slice(0, 8)) {
@@ -246,7 +254,7 @@ export async function getOverview() {
     notifications: buildNotifications({ orders, deliveries }),
     timeline: [
       { time: 'Now', title: 'Backend aktif', text: 'Data diambil dari MySQL Railway.' },
-      { time: 'Today', title: `${lowStock} stok menipis`, text: 'Perlu dipantau oleh admin gudang.' },
+      { time: 'Today', title: `${lowStock} stok menipis`, text: 'Perlu dipantau oleh gudang/cabang.' },
       { time: 'Today', title: `${activeDeliveries} pengiriman aktif`, text: 'Kurir dapat update status dan lokasi.' },
     ],
   }
@@ -458,7 +466,7 @@ export async function receiveOrder(req) {
   const after = before + qty
   await query('UPDATE rfz_materials SET stock=? WHERE id=?', [after, material.id])
   await query(`INSERT INTO rfz_movements (material_id, order_id, movement_type, source_type, quantity, unit, stock_before, stock_after, notes, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`, [material.id, order.id, 'IN', 'Barang Masuk Supplier', qty, order.unit || material.unit, before, after, `Penerimaan ${order.code}`, body.created_by || 'Admin Gudang/Cabang'])
+    VALUES (?,?,?,?,?,?,?,?,?,?)`, [material.id, order.id, 'IN', 'Barang Masuk Supplier', qty, order.unit || material.unit, before, after, `Penerimaan ${order.code}`, body.created_by || 'Gudang/Cabang'])
   await query(`UPDATE rfz_orders SET status='Pesanan Diterima' WHERE id=?`, [order.id])
   await query(`UPDATE rfz_deliveries SET status='Pengiriman Selesai', progress=100, recorded_at=NOW() WHERE order_id=?`, [order.id])
   if (order.courier_id) await query(`UPDATE rfz_couriers SET status='Tersedia' WHERE id=?`, [order.courier_id])
@@ -501,7 +509,7 @@ export async function createCourier(req) {
       'Akun kurir supplier.',
       supplierId,
       result.insertId,
-      'Aktif',
+      body.status || 'Aktif',
     ])
   }
 
@@ -558,7 +566,7 @@ export async function recordProductionUsage(req) {
   const after = Math.max(before - quantity, 0)
   await query('UPDATE rfz_materials SET stock=? WHERE id=?', [after, materialId])
   await query(`INSERT INTO rfz_movements (material_id, movement_type, source_type, quantity, unit, stock_before, stock_after, notes, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?)`, [materialId, 'OUT', 'Produksi Harian', quantity, material.unit, before, after, body.notes || 'Pemakaian produksi', body.created_by || 'Admin Gudang/Cabang'])
+    VALUES (?,?,?,?,?,?,?,?,?)`, [materialId, 'OUT', 'Produksi Harian', quantity, material.unit, before, after, body.notes || 'Pemakaian produksi', body.created_by || 'Gudang/Cabang'])
 
   return ok({ success: true, message: 'Pemakaian produksi berhasil dicatat' })
 }
@@ -587,7 +595,7 @@ export async function createManagedSupplier(req) {
   if (body.email) {
     await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,supplier_id,status)
       VALUES (?,?,?,?,?,?,?,?,?,?)
-      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), supplier_id=VALUES(supplier_id), status='Aktif'`, [
+      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), supplier_id=VALUES(supplier_id), status=VALUES(status)`, [
       name,
       body.email,
       body.password || '12345678',
@@ -597,7 +605,7 @@ export async function createManagedSupplier(req) {
       'SP',
       'Akun supplier.',
       result.insertId,
-      'Aktif',
+      body.status || 'Aktif',
     ])
   }
 
@@ -625,7 +633,9 @@ export async function updateManagedSupplier(req) {
     const params = body.password
       ? [name, body.email, body.password, id]
       : [name, body.email, id]
-    await query(`UPDATE rfz_users SET name=?, email=?${passwordUpdate}, status='Aktif' WHERE role='supplier' AND supplier_id=?`, params)
+    await query(`UPDATE rfz_users SET name=?, email=?${passwordUpdate}, status=? WHERE role='supplier' AND supplier_id=?`, [...params.slice(0, params.length - 1), body.status || 'Aktif', params[params.length - 1]])
+  } else {
+    await query(`UPDATE rfz_users SET name=?, status=? WHERE role='supplier' AND supplier_id=?`, [name, body.status || 'Aktif', id])
   }
 
   return ok({ success: true, message: 'Supplier berhasil diperbarui' })
@@ -649,17 +659,17 @@ export async function createManagedWarehouse(req) {
   if (body.email) {
     await query(`INSERT INTO rfz_users (name,email,password,role,role_name,branch,avatar,description,warehouse_id,status)
       VALUES (?,?,?,?,?,?,?,?,?,?)
-      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), warehouse_id=VALUES(warehouse_id), status='Aktif'`, [
-      body.admin_name || `Admin ${name}`,
+      ON DUPLICATE KEY UPDATE name=VALUES(name), password=VALUES(password), warehouse_id=VALUES(warehouse_id), status=VALUES(status)`, [
+      body.admin_name || body.pic_name || `PIC ${name}`,
       body.email,
       body.password || '12345678',
-      'admin',
-      'Admin Gudang',
+      'warehouse',
+      'Gudang/Cabang',
       name,
-      'AG',
-      'Akun admin gudang/cabang.',
+      'GD',
+      'Akun gudang/cabang.',
       result.insertId,
-      'Aktif',
+      body.status || 'Aktif',
     ])
   }
 
@@ -676,9 +686,11 @@ export async function updateManagedWarehouse(req) {
   if (body.email) {
     const passwordUpdate = body.password ? ', password=?' : ''
     const params = body.password
-      ? [body.admin_name || `Admin ${name}`, body.email, body.password, id]
-      : [body.admin_name || `Admin ${name}`, body.email, id]
-    await query(`UPDATE rfz_users SET name=?, email=?${passwordUpdate}, branch=?, status='Aktif' WHERE role='admin' AND warehouse_id=?`, [...params.slice(0, params.length - 1), name, params[params.length - 1]])
+      ? [body.admin_name || body.pic_name || `PIC ${name}`, body.email, body.password, id]
+      : [body.admin_name || body.pic_name || `PIC ${name}`, body.email, id]
+    await query(`UPDATE rfz_users SET name=?, email=?${passwordUpdate}, branch=?, status=? WHERE role='warehouse' AND warehouse_id=?`, [...params.slice(0, params.length - 1), name, body.status || 'Aktif', params[params.length - 1]])
+  } else {
+    await query(`UPDATE rfz_users SET name=?, branch=?, status=? WHERE role='warehouse' AND warehouse_id=?`, [body.admin_name || body.pic_name || `PIC ${name}`, name, body.status || 'Aktif', id])
   }
   return ok({ success: true, message: 'Gudang/cabang berhasil diperbarui' })
 }
@@ -687,6 +699,33 @@ export async function deleteManagedWarehouse(req) {
   const id = Number(req.body?.id || 0)
   if (!id) return ok({ success: false, message: 'ID gudang wajib diisi' }, 400)
   await query(`UPDATE rfz_warehouses SET status='Nonaktif' WHERE id=?`, [id])
-  await query(`UPDATE rfz_users SET status='Nonaktif' WHERE warehouse_id=? AND role='admin'`, [id])
+  await query(`UPDATE rfz_users SET status='Nonaktif' WHERE warehouse_id=? AND role='warehouse'`, [id])
   return ok({ success: true, message: 'Gudang/cabang berhasil dinonaktifkan' })
+}
+
+
+export async function updateManagedAccountStatus(req) {
+  const body = req.body || {}
+  const id = Number(body.id || 0)
+  const status = body.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif'
+  if (!id) return ok({ success: false, message: 'ID akun wajib diisi' }, 400)
+
+  const user = (await query('SELECT * FROM rfz_users WHERE id=? LIMIT 1', [id]))[0]
+  if (!user) return ok({ success: false, message: 'Akun tidak ditemukan' }, 404)
+  if (user.role === 'manager' && status === 'Nonaktif') {
+    return ok({ success: false, message: 'Akun manager utama tidak boleh dinonaktifkan dari fitur ini' }, 400)
+  }
+
+  await query('UPDATE rfz_users SET status=? WHERE id=?', [status, id])
+  if (user.role === 'supplier' && user.supplier_id) {
+    await query('UPDATE rfz_suppliers SET status=? WHERE id=?', [status, user.supplier_id])
+  }
+  if ((user.role === 'warehouse' || user.role === 'admin') && user.warehouse_id) {
+    await query('UPDATE rfz_warehouses SET status=? WHERE id=?', [status, user.warehouse_id])
+  }
+  if (user.role === 'courier' && user.courier_id) {
+    await query('UPDATE rfz_couriers SET status=? WHERE id=?', [status === 'Aktif' ? 'Tersedia' : 'Nonaktif', user.courier_id])
+  }
+
+  return ok({ success: true, message: `Akun berhasil ${status === 'Aktif' ? 'diaktifkan' : 'dinonaktifkan'}` })
 }
