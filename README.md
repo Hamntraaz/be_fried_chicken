@@ -1,54 +1,45 @@
-# Backend Simple PHP API
+# Backend Next.js - Rafiza Fried Chicken
 
-Endpoint utama:
+Backend ini dibuat untuk FE React/Vite kamu. Endpoint disesuaikan dengan `src/services/api.js` di frontend.
 
-- `GET /api/health`
-- `GET /api/health-db`
-- `POST /api/login`
-- `GET /api/overview`
-- `POST /api/delivery-location`
+## Jalankan lokal
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Backend jalan di:
+
+```txt
+http://localhost:3001/api
+```
+
+Di frontend `.env`, isi:
+
+```txt
+VITE_API_BASE_URL=http://localhost:3001/api
+```
 
 ## Deploy Railway
 
-Repo ini bisa langsung dideploy ke Railway sebagai PHP service. `nixpacks.toml` menjalankan:
+1. Upload/push folder ini ke GitHub.
+2. Buat project baru di Railway.
+3. Tambahkan service MySQL di Railway.
+4. Tambahkan variable:
+   - `DATABASE_URL` dari Railway MySQL
+   - `FRONTEND_URL` = URL Vercel frontend kamu, contoh `https://nama-project.vercel.app`
+5. Deploy.
+6. Setelah backend Railway aktif, ubah `.env` frontend Vercel:
 
-```bash
-php -S 0.0.0.0:$PORT -t public
+```txt
+VITE_API_BASE_URL=https://nama-backend.up.railway.app/api
 ```
 
-Tambahkan MySQL service di project Railway yang sama, lalu set environment variable backend dari variable MySQL Railway:
+## Akun default
 
-```env
-MYSQL_URL=${{ MySQL.MYSQL_URL }}
-MYSQLHOST=${{ MySQL.MYSQLHOST }}
-MYSQLPORT=${{ MySQL.MYSQLPORT }}
-MYSQLDATABASE=${{ MySQL.MYSQLDATABASE }}
-MYSQLUSER=${{ MySQL.MYSQLUSER }}
-MYSQLPASSWORD=${{ MySQL.MYSQLPASSWORD }}
-```
-
-Backend juga masih mendukung nama lokal `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, dan `DB_PASSWORD`.
-
-Setelah deploy, buka:
-
-```text
-https://DOMAIN-BACKEND.up.railway.app/api/health-db
-```
-
-Jika responsnya `Database tersambung`, tabel awal dan akun manajemen `manager@gmail.com / 12345678` sudah siap.
-
-## Update Lokasi Kurir
-
-Body JSON:
-
-```json
-{
-  "delivery_id": 1,
-  "courier_id": 3,
-  "latitude": -6.2056,
-  "longitude": 106.8292,
-  "accuracy": 25
-}
-```
-
-Endpoint ini menyimpan koordinat ke tabel `delivery_locations`, mengubah status delivery menjadi `Dalam Perjalanan`, dan mengubah status kurir menjadi `Mengantar`.
+- admin@gmail.com / 12345678
+- supplier@gmail.com / 12345678
+- kurir@gmail.com / 12345678
+- manager@gmail.com / 12345678
