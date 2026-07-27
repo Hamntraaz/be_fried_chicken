@@ -502,7 +502,7 @@ export async function getOverview(req) {
     ...data.summary,
     total_couriers: data.couriers.length,
     total_orders: data.orders.length,
-    active_deliveries: data.deliveries.filter((item) => !['Pengiriman Selesai', 'Pesanan Diterima', 'Selesai'].includes(item.status)).length + data.branch_requests.filter((item) => ['Menunggu Persetujuan Kurir', 'Tugas Diterima Kurir', 'Kurir Dalam Perjalanan', 'Driver Sampai'].includes(item.status)).length,
+    active_deliveries: data.deliveries.filter((item) => !['Pengiriman Selesai', 'Pesanan Diterima', 'Selesai'].includes(item.status)).length + data.branch_requests.filter((item) => ['Menunggu Persetujuan Kurir', 'Tugas Diterima Kurir', 'Kurir Berangkat', 'Driver Sampai'].includes(item.status)).length,
     completed_orders: data.deliveries.filter((item) => ['Pengiriman Selesai', 'Pesanan Diterima', 'Selesai'].includes(item.status)).length + data.branch_requests.filter((item) => ['Diterima Cabang'].includes(item.status)).length,
     pending_branch_requests: data.branch_requests.filter((item) => item.status === 'Menunggu Persetujuan Gudang').length,
   }
@@ -685,7 +685,7 @@ export async function driverStart(req) {
     const reqRow = await getBranchRequest(requestId)
     if (!reqRow) return ok({ success: false, message: 'Tugas cabang tidak ditemukan' }, 404)
     if (!canAccessBranchRequest(req.auth, reqRow)) return ok({ success: false, message: 'Tugas distribusi cabang ini bukan milik akun yang login' }, 403)
-    await query(`UPDATE rfz_branch_requests SET status='Kurir Dalam Perjalanan', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
+    await query(`UPDATE rfz_branch_requests SET status='Kurir Berangkat', current_lat=?, current_lng=?, updated_at=NOW() WHERE id=?`, [body.latitude || null, body.longitude || null, requestId])
     if (reqRow.courier_id) await query(`UPDATE rfz_couriers SET status='Dalam Pengiriman' WHERE id=?`, [reqRow.courier_id])
     return ok({ success: true, message: 'Kurir gudang mulai mengirim barang ke cabang' })
   }
@@ -695,12 +695,12 @@ export async function driverStart(req) {
   if (!delivery) return ok({ success: false, message: 'Delivery tidak ditemukan' }, 404)
   if (!canAccessSupplierDelivery(req.auth, delivery)) return ok({ success: false, message: 'Tugas pengiriman ini bukan milik akun yang login' }, 403)
 
-  await query(`UPDATE rfz_deliveries SET status='Kurir Dalam Perjalanan', current_lat=?, current_lng=?, progress=45, recorded_at=NOW() WHERE id=?`, [
+  await query(`UPDATE rfz_deliveries SET status='Kurir Berangkat', current_lat=?, current_lng=?, progress=45, recorded_at=NOW() WHERE id=?`, [
     body.latitude || null,
     body.longitude || null,
     deliveryId,
   ])
-  await query(`UPDATE rfz_orders SET status='Kurir Dalam Perjalanan' WHERE id=?`, [delivery.order_id])
+  await query(`UPDATE rfz_orders SET status='Kurir Berangkat' WHERE id=?`, [delivery.order_id])
   if (delivery.courier_id) await query(`UPDATE rfz_couriers SET status='Dalam Pengiriman' WHERE id=?`, [delivery.courier_id])
   return ok({ success: true, message: 'Kurir mulai pengiriman' })
 }
