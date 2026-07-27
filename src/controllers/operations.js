@@ -1229,12 +1229,12 @@ function normalizeWaypoint(value) {
   if (Array.isArray(value)) {
     const lat = Number(value[0])
     const lng = Number(value[1])
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng]
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) return [lat, lng]
   }
   if (value && typeof value === 'object') {
     const lat = Number(value.lat ?? value.latitude)
     const lng = Number(value.lng ?? value.longitude)
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng]
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) return [lat, lng]
   }
   return null
 }
